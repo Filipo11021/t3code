@@ -23,10 +23,14 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { useAtomValue } from "@effect/atom-react";
 import { shortcutLabelForCommand } from "../keybindings";
 import { primaryServerKeybindingsAtom } from "../state/server";
+import type { ContainerPickerOption } from "../features/containers/useContainerWorkspacePicker";
 
 const PREVIOUS_WORKTREE_SELECT_VALUE = "previous-worktree";
 
 interface BranchToolbarEnvModeSelectorProps {
+  containerOptions?: ReadonlyArray<ContainerPickerOption>;
+  onContainerSelect?: (value: string) => void;
+  containersAllowed?: boolean;
   forceNewWorktree?: boolean;
   envLocked: boolean;
   effectiveEnvMode: EnvMode;
@@ -46,6 +50,9 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
   previousWorktreeLabel,
   previousWorktreeBranch = null,
   onUsePreviousWorktree,
+  containerOptions = [],
+  onContainerSelect,
+  containersAllowed = false,
 }: BranchToolbarEnvModeSelectorProps) {
   const composerFloatingLayerProps = useComposerMenuProps();
   const shortcutLabel = shortcutLabelForCommand(
@@ -62,6 +69,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
     ...(showPreviousWorktree && previousWorktreeLabel
       ? [{ value: PREVIOUS_WORKTREE_SELECT_VALUE, label: previousWorktreeLabel }]
       : []),
+    ...containerOptions,
   ];
 
   const stopContextMenuMouseDown = (event: ReactMouseEvent) => {
@@ -108,6 +116,10 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
       modal={false}
       value={effectiveEnvMode}
       onValueChange={(value: string | null) => {
+        if (value === "container-fresh" || value === "container-existing") {
+          onContainerSelect?.(value);
+          return;
+        }
         if (value === PREVIOUS_WORKTREE_SELECT_VALUE) {
           onUsePreviousWorktree?.();
           return;
@@ -154,6 +166,11 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
       >
         <SelectGroup>
           <SelectGroupLabel>Workspace</SelectGroupLabel>
+          {containerOptions.map((option) => (
+            <SelectItem key={option.value} value={option.value} disabled={!containersAllowed}>
+              {option.label}
+            </SelectItem>
+          ))}
           <SelectItem value="local">
             <span className="inline-flex items-center gap-1.5">
               {activeWorktreePath ? (

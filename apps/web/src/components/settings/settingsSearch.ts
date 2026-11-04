@@ -31,6 +31,7 @@ export type SettingsPath =
   | "/settings/scheduled-tasks"
   | "/settings/source-control"
   | "/settings/worktrees"
+  | "/settings/containers"
   | "/settings/connections"
   | "/settings/access"
   | "/settings/secrets"
@@ -101,6 +102,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/scheduled-tasks": "Scheduled tasks",
   "/settings/source-control": "Source control",
   "/settings/worktrees": "Worktrees",
+  "/settings/containers": "Containers",
   "/settings/connections": "Environments",
   "/settings/access": "Sharing & access",
   "/settings/secrets": "Secrets",
@@ -138,7 +140,12 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<{
   },
   {
     heading: "Code",
-    paths: ["/settings/projects", "/settings/source-control", "/settings/worktrees"],
+    paths: [
+      "/settings/projects",
+      "/settings/source-control",
+      "/settings/worktrees",
+      "/settings/containers",
+    ],
   },
   {
     heading: "Connections",
@@ -216,6 +223,26 @@ const SOURCE_CONTROL_HOST_TERMS = sourceControlClients.definitions
   .join(" ");
 
 export const SETTINGS_SEARCH_ITEMS = [
+  {
+    id: "container-setup",
+    title: "Container install, start, and environment",
+    to: "/settings/containers",
+    targetId: "container-setup",
+    scope: "environment",
+    environmentOnly: true,
+    searchTerms: [
+      "docker ubuntu container workspace image install script start environment variables setup",
+    ],
+  },
+  {
+    id: "container-runtimes",
+    title: "Container cleanup and retained history",
+    to: "/settings/containers",
+    targetId: "container-runtimes",
+    scope: "environment",
+    environmentOnly: true,
+    searchTerms: ["container docker stop restart remove retention idle cleanup history"],
+  },
   {
     id: "storage-worktree-keep-when",
     targetId: "storage-worktrees",
@@ -1192,6 +1219,7 @@ export type SettingsSearchItemId = (typeof SETTINGS_SEARCH_ITEMS)[number]["id"];
 const SEARCH_ITEMS_BY_ID = new Map(SETTINGS_SEARCH_ITEMS.map((item) => [item.id, item] as const));
 
 const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScope | null>> = {
+  "/settings/containers": "environment",
   "/settings/diagnostics": "environment",
   "/settings/projects": "project",
   "/settings/general": null,

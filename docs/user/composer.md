@@ -382,3 +382,29 @@ including filenames or folders containing `#` or `?`.
 
 On mobile, select a PDF attachment or link to open it. iOS uses the native viewer;
 Android opens a compatible installed file viewer.
+
+## Container workspaces
+
+On web and desktop, open an unsent draft's workspace menu and choose **Fresh Ubuntu
+container** or **Existing container**. Fresh containers use `ubuntu:26.04` by default.
+Existing selection reuses a compatible container previously created for that checkout.
+T3 does not install into or remove arbitrary external containers.
+
+The draft moves to a separate T3 environment before you send it. Source files and Git
+metadata remain shared with the host. Processes, home, provider sign-in, and conversation
+history belong to the guest. Set up your provider inside that environment. Attachments
+and host context cannot move with the draft yet. Remove them first and attach files again
+after moving. A setup failure preserves the source draft and never starts a host agent.
+
+Use **Settings > Containers** on the host to configure install and start scripts, plain
+non-secret environment variables, and idle cleanup. Setup changes affect new containers.
+The install script runs once after success for a setup revision. The start script must
+finish before T3 starts on each restart. Runtime removal retains guest home and history,
+so reopening can restore the same environment. Cleanup retains busy or unreachable guests.
+Close terminals, stop running turns, and disable guest schedules before stopping a guest.
+Schedules do not wake a stopped container.
+
+Container access requires full host maintenance permissions. Native mobile does not yet
+offer container setup or draft transfer. Guest provider OAuth callbacks that require a
+separate localhost listener are not forwarded; use the provider's supported device-code
+or token sign-in instead.
