@@ -1,6 +1,8 @@
 import { EnvironmentId } from "@t3tools/contracts";
 import { RelayEnvironmentEndpointFailure } from "@t3tools/contracts/relay";
 import * as Schema from "effect/Schema";
+import { ContainerConnectionTarget } from "../containers/target.ts";
+export { ContainerConnectionTarget } from "../containers/target.ts";
 
 const ConnectionTargetBase = {
   environmentId: EnvironmentId,
@@ -40,6 +42,7 @@ export class SshConnectionTarget extends Schema.TaggedClass<SshConnectionTarget>
 ) {}
 
 export const ConnectionTarget = Schema.Union([
+  ContainerConnectionTarget,
   PrimaryConnectionTarget,
   BearerConnectionTarget,
   RelayConnectionTarget,
@@ -48,6 +51,7 @@ export const ConnectionTarget = Schema.Union([
 export type ConnectionTarget = typeof ConnectionTarget.Type;
 
 export const PersistedConnectionTarget = Schema.Union([
+  ContainerConnectionTarget,
   BearerConnectionTarget,
   RelayConnectionTarget,
   SshConnectionTarget,

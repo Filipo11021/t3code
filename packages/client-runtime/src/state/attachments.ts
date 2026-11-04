@@ -7,6 +7,10 @@ import {
   type EnvironmentId,
 } from "@t3tools/contracts";
 import type { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
+import * as Effect from "effect/Effect";
+import * as EnvironmentSupervisor from "../connection/supervisor.ts";
+import { EnvironmentRpcUnavailableError, request } from "../rpc/client.ts";
+import { authorizeContainerResource } from "../containers/media.ts";
 
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import {
@@ -24,6 +28,20 @@ export function createAttachmentEnvironmentAtoms<R, E>(
     createUploadUrl: createEnvironmentRpcCommand(runtime, {
       label: "environment-command:attachments:create-upload-url",
       tag: WS_METHODS.attachmentsCreateUploadUrl,
+      execute: Effect.fn("attachments.createUploadUrl")(function* (input) {
+        const result = yield* request(WS_METHODS.attachmentsCreateUploadUrl, input);
+        const supervisor = yield* EnvironmentSupervisor.EnvironmentSupervisor;
+        const authorized = yield* authorizeContainerResource(result.relativeUrl).pipe(
+          Effect.mapError(
+            () =>
+              new EnvironmentRpcUnavailableError({
+                environmentId: supervisor.target.environmentId,
+                message: "Could not authorize the attachment upload through the container host.",
+              }),
+          ),
+        );
+        return { ...result, relativeUrl: authorized.relativeUrl };
+      }),
     }),
     remove: createEnvironmentRpcCommand(runtime, {
       label: "environment-command:attachments:delete",

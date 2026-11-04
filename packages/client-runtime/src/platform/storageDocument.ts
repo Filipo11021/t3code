@@ -62,6 +62,7 @@ function connectionIdOf(target: ConnectionTarget): string | null {
   switch (target._tag) {
     case "PrimaryConnectionTarget":
     case "RelayConnectionTarget":
+    case "ContainerConnectionTarget":
       return null;
     case "BearerConnectionTarget":
     case "SshConnectionTarget":
@@ -133,6 +134,7 @@ export function registerConnectionInCatalog(
 
   switch (registration._tag) {
     case "RelayConnectionRegistration":
+    case "ContainerConnectionRegistration":
       return next;
     case "BearerConnectionRegistration":
     case "SshConnectionRegistration":

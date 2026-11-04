@@ -8,6 +8,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import * as HttpClient from "effect/http/HttpClient";
 
 import {
@@ -50,6 +51,9 @@ import {
 } from "./compatibility.ts";
 import { credentialConnectionId } from "./routes.ts";
 import { fetchRemoteEnvironmentDescriptor } from "../environment/descriptor.ts";
+import { prepareContainerConnection } from "../containers/connection.ts";
+import * as Persistence from "../platform/persistence.ts";
+import * as PlatformConnectionSource from "../platform/source.ts";
 
 export class ConnectionResolver extends Context.Service<
   ConnectionResolver,
@@ -270,6 +274,69 @@ export const make = Effect.gen(function* () {
   const relay = yield* makeRelayBroker();
   const ssh = yield* makeSshBroker();
   const httpClient = yield* HttpClient.HttpClient;
+  const storage = yield* Effect.serviceOption(Persistence.ConnectionTargetStore);
+  const platformSource = yield* Effect.serviceOption(
+    PlatformConnectionSource.PlatformConnectionSource,
+  );
+  const profiles = yield* ConnectionProfileStore.ConnectionProfileStore;
+
+  const authorizeHost = Effect.fn("clientRuntime.connection.authorizeHost")(function* (
+    entry: ConnectionCatalogEntry,
+  ): Effect.fn.Return<PreparedConnection, ConnectionAttemptError> {
+    const target = entry.target;
+    switch (target._tag) {
+      case "PrimaryConnectionTarget":
+        return yield* primary(target);
+      case "BearerConnectionTarget":
+        return yield* bearer({ ...entry, target });
+      case "RelayConnectionTarget":
+        return yield* relay(target);
+      case "SshConnectionTarget":
+        return yield* ssh({ ...entry, target });
+      case "ContainerConnectionTarget":
+        return yield* new ConnectionBlockedError({
+          reason: "unsupported",
+          detail: "Nested container connections are not supported.",
+        });
+    }
+  });
+
+  const container = Effect.fn("clientRuntime.connection.broker.container")(function* (
+    target: import("./model.ts").ContainerConnectionTarget,
+  ) {
+    const saved = Option.isSome(storage)
+      ? yield* storage.value.list.pipe(
+          Effect.mapError(
+            () =>
+              new ConnectionBlockedError({
+                reason: "configuration",
+                detail: "Could not read the container host connection.",
+              }),
+          ),
+        )
+      : [];
+    const platforms = Option.isSome(platformSource)
+      ? Option.getOrElse(yield* Stream.runHead(platformSource.value.registrations), () => [])
+      : [];
+    const parent = [...platforms.map((entry) => entry.target), ...saved].find(
+      (candidate) =>
+        candidate.environmentId === target.hostEnvironmentId &&
+        candidate._tag !== "ContainerConnectionTarget",
+    );
+    if (!parent)
+      return yield* new ConnectionBlockedError({
+        reason: "configuration",
+        detail: "Connect this container's host first.",
+      });
+    const profile =
+      parent._tag === "BearerConnectionTarget" || parent._tag === "SshConnectionTarget"
+        ? yield* profiles.get(parent.connectionId)
+        : Option.none();
+    const host = yield* authorizeHost({ target: parent, profile, enabled: true });
+    return yield* prepareContainerConnection(target, host).pipe(
+      Effect.provideService(HttpClient.HttpClient, httpClient),
+    );
+  });
 
   const authorize = Effect.fn("clientRuntime.connection.broker.authorize")(function* (
     entry: ConnectionCatalogEntry,
@@ -291,6 +358,8 @@ export const make = Effect.gen(function* () {
           return relay(target);
         case "SshConnectionTarget":
           return ssh({ ...entry, target });
+        case "ContainerConnectionTarget":
+          return container(target);
       }
     })();
     const { descriptor: authorizedDescriptor, ...prepared } = authorized;

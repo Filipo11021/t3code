@@ -29,6 +29,8 @@ export function connectionRouteId(target: ConnectionTarget): string {
   switch (target._tag) {
     case "PrimaryConnectionTarget":
       return "primary";
+    case "ContainerConnectionTarget":
+      return `container:${target.hostEnvironmentId}:${target.workspaceId}`;
     case "RelayConnectionTarget":
       return RELAY_ROUTE_ID;
     case "BearerConnectionTarget":
@@ -85,6 +87,8 @@ export function connectionRouteKind(route: ConnectionRoute): ConnectionRouteKind
   switch (route.target._tag) {
     case "RelayConnectionTarget":
       return "relay";
+    case "ContainerConnectionTarget":
+      return "public";
     case "SshConnectionTarget":
       return "ssh";
     case "PrimaryConnectionTarget":
@@ -161,6 +165,7 @@ function routeAddressKey(route: ConnectionRoute): string | null {
 }
 
 export function connectionRouteLabel(route: ConnectionRoute): string {
+  if (route.target._tag === "ContainerConnectionTarget") return "Container via host";
   switch (connectionRouteKind(route)) {
     case "relay":
       return "T3 Connect";
