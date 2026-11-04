@@ -3,6 +3,13 @@ import type { RelayManagedEndpointRuntimeConfig } from "@t3tools/contracts/relay
 import * as Random from "effect/Random";
 import * as DatabaseStorage from "./persistence/DatabaseStorage.ts";
 import * as StorageCleanup from "./storageCleanup.ts";
+import * as ContainerWorkspaces from "./containers/ContainerWorkspaces.ts";
+import * as ContainerEngine from "./containers/engine.ts";
+import * as ContainerRuntime from "./containers/bootstrap.ts";
+import * as ContainerRegistry from "./containers/registry.ts";
+import * as ContainerGuest from "./containers/GuestService.ts";
+import * as ContainerGateway from "./containers/gateway.ts";
+import * as GuestConnection from "./containers/GuestConnection.ts";
 import * as PullRequestSyncReactor from "./orchestration-v2/PullRequestSyncReactor.ts";
 import * as PullRequestWatchReactor from "./orchestration-v2/PullRequestWatchReactor.ts";
 import * as DelegatedTaskQuestionReactor from "./orchestration-v2/DelegatedTaskQuestionReactor.ts";
@@ -772,6 +779,8 @@ const layerMakeRoutes = Layer.mergeAll(
     ServerHttp.layerAttachmentUploadRoute,
     GuestHttp.layer,
     DeviceHubProxy.layer,
+    ContainerGateway.layer,
+    ContainerGateway.guestLayer,
     ServerBrowserStream.routeLayer,
     ServerHttp.layerStaticAndDevRoute,
     Ws.layer,
@@ -785,6 +794,17 @@ const layerMakeRoutes = Layer.mergeAll(
     RemoteDelegation.RemoteDelegation.pipe(Effect.flatMap((remote) => remote.start())),
   ),
 ).pipe(
+  Layer.provideMerge(
+    ContainerWorkspaces.layer.pipe(
+      Layer.provide(ContainerRegistry.layer),
+      Layer.provide(ContainerRuntime.layer),
+      Layer.provide(GuestConnection.layer.pipe(Layer.provideMerge(ContainerEngine.layer))),
+    ),
+  ),
+  Layer.provideMerge(GuestConnection.layer.pipe(Layer.provide(ContainerEngine.layer))),
+  Layer.provide(ContainerGuest.layer),
+  Layer.provide(RuntimeLayer.layerProjectService),
+  Layer.provide(ProjectionStoreV2.layer),
   Layer.provide(
     PullRequestReviewGuideService.layer.pipe(Layer.provide(PullRequestReviewGuides.layer)),
   ),

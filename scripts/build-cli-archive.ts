@@ -4,6 +4,7 @@ import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
+import * as Digest from "effect/crypto/Digest";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
@@ -547,6 +548,16 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
   if (input.platform !== "win") {
     yield* fs.chmod(executablePath, 0o755);
   }
+  const digest = yield* Digest.Digest;
+  yield* fs.writeFileString(
+    path.join(contentDir, "t3-runtime.json"),
+    yield* encodeJsonString({
+      version: input.version,
+      platform: input.platform,
+      arch: input.arch,
+      sha256: yield* digest.digestHex(Digest.sha256, yield* fs.readFile(executablePath)),
+    }),
+  );
 
   yield* fs.makeDirectory(input.outputDir, { recursive: true });
   const archivePath = path.join(
@@ -609,7 +620,13 @@ const command = Command.make(
 
 if (import.meta.main) {
   Command.run(command, { version: "0.0.0" }).pipe(
-    Effect.provide(Layer.mergeAll(Logger.layer([Logger.consolePretty()]), NodeServices.layer)),
+    Effect.provide(
+      Layer.mergeAll(
+        Logger.layer([Logger.consolePretty()]),
+        NodeServices.layer,
+        Digest.layerWebCrypto,
+      ),
+    ),
     NodeRuntime.runMain,
   );
 }

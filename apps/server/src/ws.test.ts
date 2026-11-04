@@ -674,6 +674,7 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(CommandOutputHub.CommandOutputHub)({}),
   Layer.mock(CodexInstallation.CodexInstallation)({ managedDirectory: "/unused" }),
   Layer.mock(DeviceService.DeviceService)({}),
+  Layer.mock(ContainerWorkspaces.ContainerWorkspaces)({}),
   Layer.mock(EnvironmentTheme.EnvironmentThemeService)({}),
   Layer.mock(GitWorkflowService.GitWorkflowService)({}),
   Layer.mock(HostResources.HostResources)({}),
@@ -1338,3 +1339,4 @@ it.effect("thread resume at its own high-water below the pruned boundary skips t
     assert.isTrue(Exit.isSuccess(exit));
   }).pipe(Effect.scoped, Effect.provide(ReplayTestLayer)),
 );
+import * as ContainerWorkspaces from "./containers/ContainerWorkspaces.ts";

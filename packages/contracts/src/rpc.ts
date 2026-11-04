@@ -34,6 +34,16 @@ import {
   ChatGptHandoffState,
 } from "./providerSetup.ts";
 import * as Schema from "effect/Schema";
+import {
+  ContainerActionInput,
+  ContainerConfig,
+  ContainerDestination,
+  ContainerError,
+  ContainerListInput,
+  ContainerSettings,
+  ContainerWorkspace,
+  OpenContainerInput,
+} from "./containerWorkspace.ts";
 import * as Rpc from "effect/rpc/Rpc";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/rpc/RpcMiddleware";
@@ -406,6 +416,11 @@ import { VcsError } from "./vcs.ts";
 import { Project, ProjectMutation, ProjectMutationError } from "./project.ts";
 
 export const WS_METHODS = {
+  containersOpen: "containers.open",
+  containersSettings: "containers.settings",
+  containersConfigure: "containers.configure",
+  containersAct: "containers.act",
+  containersCleanup: "containers.cleanup",
   projectsListEntries: "projects.listEntries",
   projectsListIgnoredFiles: "projects.listIgnoredFiles",
   projectsReadFile: "projects.readFile",
@@ -1988,6 +2003,23 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
 ) {}
 
 export const WsRpcGroup = RpcGroup.make(
+  Rpc.make(WS_METHODS.containersOpen, {
+    payload: OpenContainerInput,
+    success: ContainerDestination,
+    error: ContainerError,
+  }),
+  Rpc.make(WS_METHODS.containersSettings, {
+    payload: ContainerListInput,
+    success: ContainerSettings,
+    error: ContainerError,
+  }),
+  Rpc.make(WS_METHODS.containersConfigure, { payload: ContainerConfig, error: ContainerError }),
+  Rpc.make(WS_METHODS.containersAct, {
+    payload: ContainerActionInput,
+    success: ContainerWorkspace,
+    error: ContainerError,
+  }),
+  Rpc.make(WS_METHODS.containersCleanup, { error: ContainerError }),
   WsGuestShareCreateRpc,
   WsServerProbeRpc,
   WsServerGetConfigRpc,
