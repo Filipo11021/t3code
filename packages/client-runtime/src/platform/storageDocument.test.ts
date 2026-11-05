@@ -1,8 +1,12 @@
-import { EnvironmentId } from "@t3tools/contracts";
+import { ContainerWorkspaceId, EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import {
+  ContainerConnectionRegistration,
+  ContainerConnectionTarget,
+} from "../containers/target.ts";
 
 import * as TokenStore from "../authorization/tokenStore.ts";
 import {
@@ -26,6 +30,7 @@ import {
 } from "../connection/pullRequestRoutingPermissions.ts";
 import {
   ConnectionCatalogDocument,
+  type ConnectionCatalogState,
   EMPTY_CONNECTION_CATALOG_DOCUMENT,
   catalogRoutes,
   setRoutesInCatalog,
@@ -75,7 +80,7 @@ const REMOTE_TOKEN = new TokenStore.RemoteDpopAccessToken({
 describe("ConnectionCatalogDocument", () => {
   it.effect("persists explicit GitHub trust and forgets it when a connection is removed", () =>
     Effect.gen(function* () {
-      let document = EMPTY_CONNECTION_CATALOG_DOCUMENT;
+      let document: ConnectionCatalogState = EMPTY_CONNECTION_CATALOG_DOCUMENT;
       const entry = { target: BEARER_TARGET, profile: Option.some(BEARER_PROFILE), enabled: true };
       const storage = {
         read: Effect.sync(() => document.githubRoutingPermissions ?? []),
@@ -382,6 +387,26 @@ describe("ConnectionCatalogDocument", () => {
     );
     expect(catalogRoutes(withRelay, ENVIRONMENT_ID)).toEqual([BEARER_TARGET, RELAY_TARGET]);
     expect(withRelay.credentials).toHaveLength(1);
+
+    const container = new ContainerConnectionTarget({
+      environmentId: ENVIRONMENT_ID,
+      hostEnvironmentId: EnvironmentId.make("host"),
+      workspaceId: ContainerWorkspaceId.make("workspace"),
+      label: "Ubuntu",
+    });
+    const withContainer = registerConnectionInCatalog(
+      withRelay,
+      new ContainerConnectionRegistration({ target: container }),
+      [container, BEARER_TARGET, RELAY_TARGET],
+    );
+    expect(
+      setRoutesInCatalog(withContainer, ENVIRONMENT_ID, [BEARER_TARGET, RELAY_TARGET]),
+    ).toEqual(withRelay);
+    const containerOnly = setRoutesInCatalog(withContainer, ENVIRONMENT_ID, [container]);
+    expect(containerOnly.targets).toEqual([container]);
+    expect(containerOnly.credentials).toEqual([]);
+    expect(containerOnly.profiles).toEqual([]);
+    expect(containerOnly.remoteDpopTokens).toEqual([]);
 
     const relayOnly = setRoutesInCatalog(withRelay, ENVIRONMENT_ID, [RELAY_TARGET]);
     expect(relayOnly.targets).toEqual([RELAY_TARGET]);

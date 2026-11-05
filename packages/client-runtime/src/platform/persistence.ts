@@ -13,7 +13,7 @@ import * as Schema from "effect/Schema";
 
 import type { ConnectionRegistration } from "../connection/catalog.ts";
 import type { DeferredShellSnapshot } from "../state/shellPullRequests.ts";
-import type { ConnectionTarget, PersistedConnectionTarget } from "../connection/model.ts";
+import type { ConnectionTarget, SavedConnectionTarget } from "../connection/model.ts";
 
 export class ConnectionPersistenceError extends Schema.TaggedError<ConnectionPersistenceError>()(
   "ConnectionPersistenceError",
@@ -58,14 +58,14 @@ export class ConnectionRegistrationStore extends Context.Service<
      */
     readonly register: (
       registration: ConnectionRegistration,
-      routes: ReadonlyArray<PersistedConnectionTarget>,
+      routes: ReadonlyArray<SavedConnectionTarget>,
     ) => Effect.Effect<void, ConnectionPersistenceError>;
     /**
      * `routes` must not be empty.
      */
     readonly setRoutes: (
       environmentId: EnvironmentId,
-      routes: ReadonlyArray<PersistedConnectionTarget>,
+      routes: ReadonlyArray<SavedConnectionTarget>,
     ) => Effect.Effect<void, ConnectionPersistenceError>;
     readonly remove: (
       environmentId: EnvironmentId,

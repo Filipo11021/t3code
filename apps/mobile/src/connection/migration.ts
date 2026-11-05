@@ -7,7 +7,7 @@ import {
   BearerConnectionTarget,
 } from "@t3tools/client-runtime/connection";
 import {
-  type ConnectionCatalogDocument,
+  type ConnectionCatalogState,
   EMPTY_CONNECTION_CATALOG_DOCUMENT,
   registerConnectionInCatalog,
 } from "@t3tools/client-runtime/platform";
@@ -45,9 +45,9 @@ function isRelayManaged(connection: typeof LegacySavedRemoteConnection.Type): bo
 }
 
 function migrateConnection(
-  document: ConnectionCatalogDocument,
+  document: ConnectionCatalogState,
   connection: typeof LegacySavedRemoteConnection.Type,
-): ConnectionCatalogDocument {
+): ConnectionCatalogState {
   if (isRelayManaged(connection)) {
     return registerConnectionInCatalog(
       document,

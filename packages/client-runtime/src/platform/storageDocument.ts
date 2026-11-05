@@ -7,7 +7,11 @@ import {
   ConnectionCredential,
   ConnectionProfile,
 } from "../connection/catalog.ts";
-import { type ConnectionTarget, PersistedConnectionTarget } from "../connection/model.ts";
+import {
+  type ConnectionTarget,
+  type SavedConnectionTarget,
+  PersistedConnectionTarget,
+} from "../connection/model.ts";
 import * as TokenStore from "../authorization/tokenStore.ts";
 import { StoredPullRequestRoutingPermission } from "../connection/pullRequestRoutingPermissions.ts";
 
@@ -31,6 +35,9 @@ export const ConnectionCatalogDocument = Schema.Struct({
   ),
 });
 export type ConnectionCatalogDocument = typeof ConnectionCatalogDocument.Type;
+export type ConnectionCatalogState = Omit<ConnectionCatalogDocument, "targets"> & {
+  readonly targets: ReadonlyArray<SavedConnectionTarget>;
+};
 
 export const EMPTY_CONNECTION_CATALOG_DOCUMENT: ConnectionCatalogDocument = Object.freeze({
   schemaVersion: 1,
@@ -75,9 +82,9 @@ function routeKey(target: ConnectionTarget): string {
 }
 
 function removeRouteMetadata(
-  document: ConnectionCatalogDocument,
+  document: ConnectionCatalogState,
   removed: ReadonlyArray<ConnectionTarget>,
-): ConnectionCatalogDocument {
+): ConnectionCatalogState {
   const connectionIds = new Set(removed.flatMap((target) => connectionIdOf(target) ?? []));
   const relayRemoved = removed.some((target) => target._tag === "RelayConnectionTarget");
   const environmentIds = new Set(removed.map((target) => target.environmentId));
@@ -92,9 +99,9 @@ function removeRouteMetadata(
 }
 
 export function catalogRoutes(
-  document: ConnectionCatalogDocument,
+  document: ConnectionCatalogState,
   environmentId: EnvironmentId,
-): ReadonlyArray<PersistedConnectionTarget> {
+): ReadonlyArray<SavedConnectionTarget> {
   return document.targets.filter((target) => target.environmentId === environmentId);
 }
 
@@ -104,10 +111,10 @@ export function catalogRoutes(
  * in place; use `removeConnectionFromCatalog` to forget the environment.
  */
 export function setRoutesInCatalog(
-  document: ConnectionCatalogDocument,
+  document: ConnectionCatalogState,
   environmentId: EnvironmentId,
-  routes: ReadonlyArray<PersistedConnectionTarget>,
-): ConnectionCatalogDocument {
+  routes: ReadonlyArray<SavedConnectionTarget>,
+): ConnectionCatalogState {
   const kept = new Set(routes.map(routeKey));
   const dropped = catalogRoutes(document, environmentId).filter(
     (target) => !kept.has(routeKey(target)),
@@ -126,10 +133,10 @@ export function setRoutesInCatalog(
 }
 
 export function registerConnectionInCatalog(
-  document: ConnectionCatalogDocument,
+  document: ConnectionCatalogState,
   registration: ConnectionRegistration,
-  routes: ReadonlyArray<PersistedConnectionTarget> = [registration.target],
-): ConnectionCatalogDocument {
+  routes: ReadonlyArray<SavedConnectionTarget> = [registration.target],
+): ConnectionCatalogState {
   const next = setRoutesInCatalog(document, registration.target.environmentId, routes);
 
   switch (registration._tag) {
@@ -154,9 +161,9 @@ export function registerConnectionInCatalog(
 }
 
 export function removeConnectionFromCatalog(
-  document: ConnectionCatalogDocument,
+  document: ConnectionCatalogState,
   environmentId: EnvironmentId,
-): ConnectionCatalogDocument {
+): ConnectionCatalogState {
   const next = setRoutesInCatalog(document, environmentId, []);
   return {
     ...next,
@@ -181,10 +188,10 @@ export function removeConnectionFromCatalog(
 }
 
 export function setConnectionEnabledInCatalog(
-  document: ConnectionCatalogDocument,
+  document: ConnectionCatalogState,
   environmentId: EnvironmentId,
   enabled: boolean,
-): ConnectionCatalogDocument {
+): ConnectionCatalogState {
   const registered = document.targets.some((target) => target.environmentId === environmentId);
   const without = removeCatalogValue(
     document.disabledEnvironmentIds,
@@ -198,9 +205,9 @@ export function setConnectionEnabledInCatalog(
 }
 
 export function putRemoteDpopTokenInCatalog(
-  document: ConnectionCatalogDocument,
+  document: ConnectionCatalogState,
   token: TokenStore.RemoteDpopAccessToken,
-): ConnectionCatalogDocument {
+): ConnectionCatalogState {
   const registered = document.targets.some(
     (target) =>
       target._tag === "RelayConnectionTarget" && target.environmentId === token.environmentId,

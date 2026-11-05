@@ -49,9 +49,9 @@ export const ConnectionTarget = Schema.Union([
   SshConnectionTarget,
 ]);
 export type ConnectionTarget = typeof ConnectionTarget.Type;
+export type SavedConnectionTarget = Exclude<ConnectionTarget, PrimaryConnectionTarget>;
 
 export const PersistedConnectionTarget = Schema.Union([
-  ContainerConnectionTarget,
   BearerConnectionTarget,
   RelayConnectionTarget,
   SshConnectionTarget,

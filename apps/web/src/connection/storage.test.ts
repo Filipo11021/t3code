@@ -14,6 +14,35 @@ import { afterEach, vi } from "vite-plus/test";
 
 import * as ConnectionStorage from "./storage";
 
+const ordinaryCatalog = {
+  schemaVersion: 1,
+  targets: [
+    { _tag: "BearerConnectionTarget", environmentId: "host", label: "Host", connectionId: "lan" },
+  ],
+  profiles: [
+    {
+      _tag: "BearerConnectionProfile",
+      environmentId: "host",
+      label: "Host",
+      connectionId: "lan",
+      httpBaseUrl: "https://host.test",
+      wsBaseUrl: "wss://host.test",
+    },
+  ],
+  credentials: [
+    { connectionId: "lan", credential: { _tag: "BearerConnectionCredential", token: "secret" } },
+  ],
+  remoteDpopTokens: [],
+  disabledEnvironmentIds: ["host"],
+};
+const containerTarget = {
+  _tag: "ContainerConnectionTarget",
+  environmentId: "guest",
+  hostEnvironmentId: "host",
+  workspaceId: "workspace",
+  label: "Ubuntu",
+};
+
 const emptyCatalog = {
   schemaVersion: 1,
   targets: [],
@@ -31,21 +60,89 @@ afterEach(() => {
 });
 
 describe("ConnectionStorage.makeCatalogStore", () => {
-  it.effect("quarantines malformed catalogs and starts from an empty document", () =>
+  it.effect.each([
+    { name: "invalid JSON", raw: "{not-json", corrupt: true },
+    {
+      name: "malformed feature metadata",
+      raw: JSON.stringify({ ...ordinaryCatalog, containerConnections: null }),
+      corrupt: false,
+    },
+    {
+      name: "future feature metadata",
+      raw: JSON.stringify({ ...ordinaryCatalog, containerConnections: { schemaVersion: 999 } }),
+      corrupt: false,
+    },
+  ])("quarantines only core corruption with $name", ({ raw, corrupt }) =>
     Effect.gen(function* () {
       const writes: string[] = [];
       const quarantined: string[] = [];
       const store = yield* ConnectionStorage.makeCatalogStore({
-        read: Effect.succeed("{not-json"),
+        read: Effect.succeed(raw),
         write: (raw) => Effect.sync(() => writes.push(raw)),
         quarantine: (raw) => Effect.sync(() => quarantined.push(raw)),
       });
 
-      expect(yield* store.read).toEqual(emptyCatalog);
-      expect(quarantined).toEqual(["{not-json"]);
-      expect(writes).toHaveLength(1);
-      expect(decodeCatalog(writes[0]!)).toEqual(emptyCatalog);
+      expect(yield* store.read).toEqual(corrupt ? emptyCatalog : ordinaryCatalog);
+      expect(quarantined).toEqual(corrupt ? [raw] : []);
+      expect(writes).toHaveLength(corrupt ? 1 : 0);
+      if (corrupt) expect(decodeCatalog(writes[0]!)).toEqual(emptyCatalog);
     }),
+  );
+
+  it.effect(
+    "requires durable legacy repair before caching without treating write failures as corruption",
+    () =>
+      Effect.gen(function* () {
+        const legacy = JSON.stringify({
+          ...ordinaryCatalog,
+          targets: [containerTarget, ...ordinaryCatalog.targets],
+        });
+        let bytes = legacy;
+        let fail = true;
+        const writes: string[] = [];
+        const quarantined: string[] = [];
+        const failure = new ConnectionTransientError({
+          reason: "remote-unavailable",
+          detail: "quota exceeded",
+        });
+        const backend = {
+          read: Effect.sync(() => bytes),
+          write: (raw: string) =>
+            Effect.gen(function* () {
+              writes.push(raw);
+              if (fail) return yield* failure;
+              bytes = raw;
+            }),
+          quarantine: (raw: string) => Effect.sync(() => quarantined.push(raw)),
+        };
+        const store = yield* ConnectionStorage.makeCatalogStore(backend);
+        expect(yield* store.read.pipe(Effect.flip)).toBe(failure);
+        expect(bytes).toBe(legacy);
+        expect(writes).toHaveLength(1);
+        expect(decodeCatalog(writes[0]!)).toEqual(ordinaryCatalog);
+        expect(quarantined).toEqual([]);
+
+        fail = false;
+        const loaded = yield* store.read;
+        expect(loaded).toEqual({
+          ...ordinaryCatalog,
+          targets: [containerTarget, ...ordinaryCatalog.targets],
+        });
+        expect(bytes).not.toBe(legacy);
+        expect(decodeCatalog(bytes)).toEqual(ordinaryCatalog);
+        const restarted = yield* ConnectionStorage.makeCatalogStore(backend);
+        expect(yield* restarted.read).toEqual(loaded);
+        expect(writes).toHaveLength(2);
+
+        const canonical = bytes;
+        fail = true;
+        expect(yield* store.update((state) => ({ ...state, targets: [] })).pipe(Effect.flip)).toBe(
+          failure,
+        );
+        expect(yield* store.read).toEqual(loaded);
+        expect(bytes).toBe(canonical);
+        expect(quarantined).toEqual([]);
+      }),
   );
 
   it.effect("does not hide catalog read failures", () =>

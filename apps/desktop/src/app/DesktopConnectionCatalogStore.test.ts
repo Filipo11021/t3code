@@ -106,7 +106,55 @@ describe("DesktopConnectionCatalogStore", () => {
     withStore(
       Effect.gen(function* () {
         const store = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore;
-        const catalog = '{"schemaVersion":1,"targets":[]}';
+        const catalog =
+          JSON.stringify(
+            {
+              schemaVersion: 1,
+              targets: [
+                {
+                  _tag: "BearerConnectionTarget",
+                  environmentId: "host",
+                  label: "Host",
+                  connectionId: "lan",
+                },
+              ],
+              profiles: [
+                {
+                  _tag: "BearerConnectionProfile",
+                  environmentId: "host",
+                  label: "Host",
+                  connectionId: "lan",
+                  httpBaseUrl: "https://host.test",
+                  wsBaseUrl: "wss://host.test",
+                },
+              ],
+              credentials: [
+                {
+                  connectionId: "lan",
+                  credential: { _tag: "BearerConnectionCredential", token: "secret" },
+                },
+              ],
+              remoteDpopTokens: [],
+              disabledEnvironmentIds: ["guest"],
+              containerConnections: {
+                schemaVersion: 1,
+                routes: [
+                  {
+                    position: 0,
+                    target: {
+                      _tag: "ContainerConnectionTarget",
+                      environmentId: "guest",
+                      hostEnvironmentId: "host",
+                      workspaceId: "workspace",
+                      label: "Ubuntu",
+                    },
+                  },
+                ],
+              },
+            },
+            null,
+            2,
+          ) + "\n";
 
         assert.isTrue(yield* store.set(catalog));
         assert.deepStrictEqual(yield* store.get, Option.some(catalog));
