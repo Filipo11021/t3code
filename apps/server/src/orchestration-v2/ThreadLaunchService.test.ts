@@ -15,6 +15,7 @@ import {
   ComposerContextId,
   type ChatAttachment,
   CommandId,
+  ContainerOperationId,
   DEFAULT_SERVER_SETTINGS,
   GitCommandError,
   MessageId,
@@ -27,11 +28,13 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
+import * as ConfigProvider from "effect/ConfigProvider";
 import * as Deferred from "effect/Deferred";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
@@ -66,6 +69,10 @@ import * as ThreadTitleRegeneration from "./ThreadTitleRegenerationService.ts";
 import * as ProviderReplayHarness from "./testkit/ProviderReplayHarness.ts";
 import * as RemoteDelegation from "../peer/RemoteDelegation.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import * as ContainerSubmissions from "../containers/ContainerSubmissions.ts";
+import * as ContainerRegistry from "../containers/registry.ts";
+import * as EventStore from "./EventStore.ts";
+import * as EffectWorker from "./EffectWorker.ts";
 
 const projectId = ProjectId.make("project:launch-test");
 const otherProjectId = ProjectId.make("project:launch-other");
@@ -276,6 +283,7 @@ function makeHarness(options: HarnessOptions = {}) {
   );
   return {
     layer: Layer.mergeAll(
+      layerOrchestrator,
       layerLaunch,
       layerRegistry,
       layerThreadManagement,
@@ -323,6 +331,251 @@ function launchInput(input: {
     creationSource: "web" as const,
   };
 }
+
+const containerProvider: ServerProvider = {
+  instanceId: modelSelection.instanceId,
+  driver: ProviderDriverKind.make("codex"),
+  enabled: true,
+  installed: true,
+  version: null,
+  status: "ready",
+  auth: { status: "authenticated" },
+  checkedAt: "2026-11-05T00:00:00.000Z",
+  models: [{ slug: modelSelection.model, name: "Test", isCustom: false, capabilities: null }],
+  slashCommands: [],
+  skills: [],
+};
+const containerRecord = (id: string): ContainerRegistry.SubmissionRecord => {
+  const identity = `container-${id}`;
+  const message = {
+    projectId,
+    text: "Preserved guest prompt",
+    modelSelection,
+    runtimeMode: "full-access",
+    interactionMode: "default",
+  } as const;
+  return {
+    operationId: ContainerOperationId.make(id),
+    message,
+    launch: {
+      commandId: CommandId.make(identity),
+      threadId: ThreadId.make(identity),
+      projectId,
+      title: "New thread",
+      generateTitle: true,
+      modelSelection,
+      runtimeMode: message.runtimeMode,
+      interactionMode: message.interactionMode,
+      workspaceStrategy: { type: "root" },
+      initialMessage: { messageId: MessageId.make(identity), text: message.text, attachments: [] },
+      createdBy: "user",
+      creationSource: "web",
+    },
+  };
+};
+const containerHarness = (options: HarnessOptions = {}, guest = true) => {
+  const harness = makeHarness({ providers: [containerProvider], ...options });
+  return ContainerSubmissions.layer.pipe(
+    Layer.provideMerge(
+      Layer.mergeAll(ContainerRegistry.layer, CommandReceiptStore.layer, EventStore.layer),
+    ),
+    Layer.provideMerge(harness.layer),
+    Layer.provideMerge(
+      ServerConfig.ServerConfig.layerTest("/repo", { prefix: "container-admission-" }),
+    ),
+    Layer.provide(NodeServices.layer),
+    Layer.provide(
+      ConfigProvider.layer(
+        ConfigProvider.fromUnknown({ T3CODE_CONTAINER_GUEST: guest ? "1" : "0" }),
+      ),
+    ),
+  );
+};
+
+it.effect.each(["sealed", "created", "accepted"] as const)(
+  "container admission reconstructs $0 without mutation and explicitly resumes one initial message",
+  (milestone) =>
+    Effect.gen(function* () {
+      const submissions = yield* ContainerSubmissions.ContainerSubmissions;
+      const registry = yield* ContainerRegistry.ContainerRegistry;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const events = yield* EventStore.EventStoreV2;
+      const outbox = yield* EffectOutbox.EffectOutboxV2;
+      const record = containerRecord(`recover-${milestone}`);
+      const input = { operationId: record.operationId, message: record.message };
+      yield* registry.sealSubmission(record);
+      if (milestone !== "sealed")
+        yield* threads.dispatch({
+          type: "thread.create",
+          ...record.launch,
+          branch: null,
+          worktreePath: null,
+        });
+      if (milestone === "accepted")
+        yield* threads.dispatch({
+          type: "message.dispatch",
+          commandId: CommandId.make(`${record.launch.commandId}:initial-message`),
+          threadId: record.launch.threadId,
+          messageId: record.launch.initialMessage.messageId,
+          text: record.message.text,
+          attachments: [],
+          modelSelection,
+          dispatchMode: { type: "defer_start" },
+          createdBy: "user",
+          creationSource: "web",
+        });
+      const before = yield* events.latestApplicationSequence;
+      const status = yield* submissions.inspect(input);
+      const reconstructed = yield* ContainerSubmissions.ContainerSubmissions.pipe(
+        Effect.flatMap((fresh) => fresh.inspect(input)),
+        Effect.provide(
+          ContainerSubmissions.layer.pipe(
+            Layer.provide(
+              ConfigProvider.layer(ConfigProvider.fromUnknown({ T3CODE_CONTAINER_GUEST: "1" })),
+            ),
+          ),
+        ),
+      );
+      assert.deepEqual(reconstructed, status);
+      assert.equal(
+        status.kind,
+        milestone === "sealed"
+          ? "reserved"
+          : milestone === "created"
+            ? "thread-created"
+            : "accepted",
+      );
+      if (status.kind === "accepted") assert.equal(status.preparation, "preparing");
+      assert.equal(yield* events.latestApplicationSequence, before);
+      assert.equal(
+        (yield* outbox.listByCommandId(CommandId.make(`${record.launch.commandId}:release`)))
+          .length,
+        0,
+      );
+      const resumed = yield* Effect.all([submissions.submit(input), submissions.submit(input)], {
+        concurrency: "unbounded",
+      });
+      assert.isTrue(resumed.every((result) => result.kind === "accepted"));
+      yield* preparationSettled(record.launch.threadId);
+      const projection = yield* threads.getThreadProjection(record.launch.threadId);
+      assert.equal(projection.messages.length, 1);
+      assert.equal(projection.messages[0]?.text, record.message.text);
+      assert.equal(projection.runs.length, 1);
+      const releaseEffects = yield* outbox.listByCommandId(
+        CommandId.make(`${record.launch.commandId}:release`),
+      );
+      assert.equal(
+        releaseEffects.filter((entry) => entry.request.type === "provider-turn.start").length,
+        1,
+      );
+      yield* (yield* EffectWorker.OrchestrationEffectWorkerV2).drain();
+      assert.equal(
+        (yield* threads.getThreadProjection(record.launch.threadId)).messages.filter(
+          (message) => message.role === "user",
+        ).length,
+        1,
+      );
+      assert.deepEqual(yield* registry.submission(record.operationId), record);
+      assert.equal(
+        (yield* submissions.submit({ ...input, message: { ...input.message, text: "different" } }))
+          .kind,
+        "conflict",
+      );
+    }).pipe(Effect.provide(containerHarness())),
+);
+
+it.effect(
+  "container admission seals before launch, allows read-only inspect during submit and rejects unequal concurrent payloads",
+  () =>
+    Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const layer = containerHarness({
+        managedFolders: Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+          namedProjectsRoot: "/projects",
+          isScratchProject: () => Effect.succeed(false),
+          folderForThread: () =>
+            Deferred.succeed(entered, undefined).pipe(
+              Effect.andThen(Deferred.await(release)),
+              Effect.as(Option.none()),
+            ),
+        }),
+      });
+      yield* Effect.gen(function* () {
+        const submissions = yield* ContainerSubmissions.ContainerSubmissions;
+        const input = containerRecord("concurrent");
+        const first = yield* submissions.submit(input).pipe(Effect.forkChild);
+        yield* Deferred.await(entered);
+        assert.equal((yield* submissions.inspect(input)).kind, "reserved");
+        const unequal = yield* submissions
+          .submit({ ...input, message: { ...input.message, interactionMode: "plan" } })
+          .pipe(Effect.forkChild);
+        yield* Deferred.succeed(release, undefined);
+        assert.equal((yield* Fiber.join(first)).kind, "accepted");
+        assert.equal((yield* Fiber.join(unequal)).kind, "conflict");
+        assert.equal((yield* submissions.submit(input)).kind, "accepted");
+      }).pipe(Effect.provide(layer));
+    }),
+);
+
+it.effect(
+  "container admission preserves accepted evidence when a disabled provider blocks preparation",
+  () =>
+    Effect.gen(function* () {
+      const submissions = yield* ContainerSubmissions.ContainerSubmissions;
+      const registry = yield* ContainerRegistry.ContainerRegistry;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const settings = yield* ServerSettings.ServerSettingsService;
+      const record = containerRecord("disabled");
+      yield* registry.sealSubmission(record);
+      yield* threads.dispatch({
+        type: "thread.create",
+        ...record.launch,
+        branch: null,
+        worktreePath: null,
+      });
+      yield* threads.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make(`${record.launch.commandId}:initial-message`),
+        threadId: record.launch.threadId,
+        messageId: record.launch.initialMessage.messageId,
+        text: record.message.text,
+        attachments: [],
+        modelSelection,
+        dispatchMode: { type: "defer_start" },
+        createdBy: "user",
+        creationSource: "web",
+      });
+      yield* settings.updateSettings({
+        projectSettingsOverrides: {
+          [projectId]: { providerInstances: { [modelSelection.instanceId]: { enabled: false } } },
+        },
+      });
+      const accepted = yield* submissions.submit(record);
+      assert.equal(accepted.kind, "accepted");
+      if (accepted.kind === "accepted") assert.equal(accepted.preparation, "blocked");
+      assert.deepEqual(yield* submissions.inspect(record), accepted);
+      assert.equal((yield* threads.getThreadProjection(record.launch.threadId)).messages.length, 1);
+    }).pipe(Effect.provide(containerHarness())),
+);
+
+it.effect(
+  "container admission refuses host execution and leaves unready guest requests unsealed",
+  () =>
+    Effect.gen(function* () {
+      const input = containerRecord("unready");
+      yield* Effect.gen(function* () {
+        const service = yield* ContainerSubmissions.ContainerSubmissions;
+        assert.equal((yield* service.submit(input).pipe(Effect.flip)).reason, "incompatible");
+        assert.equal((yield* service.inspect(input).pipe(Effect.flip)).reason, "incompatible");
+      }).pipe(Effect.provide(containerHarness({}, false)));
+      yield* Effect.gen(function* () {
+        const service = yield* ContainerSubmissions.ContainerSubmissions;
+        assert.equal((yield* service.submit(input)).kind, "provider-required");
+        assert.equal((yield* service.inspect(input)).kind, "unseen");
+      }).pipe(Effect.provide(containerHarness({ providers: [] })));
+    }),
+);
 
 it.effect.each(
   (["new", "existing"] as const).flatMap((target) =>

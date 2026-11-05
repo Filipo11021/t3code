@@ -193,6 +193,7 @@ import * as ServerBrowser from "./preview/ServerBrowser.ts";
 import * as DeviceService from "./device/DeviceService.ts";
 import * as ContainerRpc from "./containers/rpc.ts";
 import * as ContainerWorkspaces from "./containers/ContainerWorkspaces.ts";
+import * as ContainerSubmissions from "./containers/ContainerSubmissions.ts";
 import { remoteSshDeviceHosts } from "./device/localSshDeviceHost.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import { issueAssetUrl } from "./assets/AssetAccess.ts";
@@ -3421,6 +3422,7 @@ export const WS_RPC_SERVER_OPTIONS = {
 export const layer = Layer.unwrap(
   Effect.gen(function* () {
     const containers = yield* ContainerWorkspaces.ContainerWorkspaces;
+    const containerSubmissions = yield* ContainerSubmissions.ContainerSubmissions;
     const serverBrowser = yield* ServerBrowser.ServerBrowser;
     const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
     const npmRelease = yield* NpmRelease.NpmRelease;
@@ -3500,6 +3502,9 @@ export const layer = Layer.unwrap(
             ).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
               Layer.provide(Layer.succeed(ContainerWorkspaces.ContainerWorkspaces, containers)),
+              Layer.provide(
+                Layer.succeed(ContainerSubmissions.ContainerSubmissions, containerSubmissions),
+              ),
               // Handler-context reporters see only request defects, not server-wide defects.
               Layer.provide(DefectReporter.layer),
               Layer.provide(Layer.succeed(SqlClient.SqlClient, sql)),

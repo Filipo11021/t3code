@@ -96,6 +96,7 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   storageCleanup: Schema.optionalKey(Schema.Boolean),
   containerWorkspaces: Schema.optionalKey(Schema.Boolean),
   containerProjects: Schema.optionalKey(Schema.Boolean),
+  containerSubmissions: Schema.optionalKey(Schema.Boolean),
   storageCleanupRun: Schema.optionalKey(Schema.Boolean),
   databaseStorage: Schema.optionalKey(Schema.Boolean),
   otlpEndpointCheck: Schema.optionalKey(Schema.Boolean),

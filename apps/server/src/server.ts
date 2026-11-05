@@ -4,6 +4,9 @@ import * as Random from "effect/Random";
 import * as DatabaseStorage from "./persistence/DatabaseStorage.ts";
 import * as StorageCleanup from "./storageCleanup.ts";
 import * as ContainerWorkspaces from "./containers/ContainerWorkspaces.ts";
+import * as ContainerSubmissions from "./containers/ContainerSubmissions.ts";
+import * as CommandReceiptStore from "./orchestration-v2/CommandReceiptStore.ts";
+import * as EventStore from "./orchestration-v2/EventStore.ts";
 import * as ContainerEngine from "./containers/engine.ts";
 import * as ContainerRuntime from "./containers/bootstrap.ts";
 import * as ContainerRegistry from "./containers/registry.ts";
@@ -799,6 +802,13 @@ const layerMakeRoutes = Layer.mergeAll(
       Layer.provide(ContainerRegistry.layer),
       Layer.provide(ContainerRuntime.layer),
       Layer.provide(GuestConnection.layer.pipe(Layer.provideMerge(ContainerEngine.layer))),
+    ),
+  ),
+  Layer.provideMerge(
+    ContainerSubmissions.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(ContainerRegistry.layer, CommandReceiptStore.layer, EventStore.layer),
+      ),
     ),
   ),
   Layer.provideMerge(GuestConnection.layer.pipe(Layer.provide(ContainerEngine.layer))),

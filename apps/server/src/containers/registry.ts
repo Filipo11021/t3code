@@ -8,6 +8,10 @@ import {
   ContainerSetup,
   ProjectContainerSetupRecord,
   ProjectContainerCleanupRecord,
+  ContainerGuestMessage,
+  CommandId,
+  ThreadId,
+  MessageId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -44,6 +48,31 @@ const decodeSetup = Schema.decodeEffect(Schema.fromJsonString(ProjectContainerSe
 const encodeSetup = Schema.encodeEffect(Schema.fromJsonString(ProjectContainerSetupRecord));
 const decodeCleanup = Schema.decodeEffect(Schema.fromJsonString(ProjectContainerCleanupRecord));
 const encodeCleanup = Schema.encodeEffect(Schema.fromJsonString(ProjectContainerCleanupRecord));
+export const SubmissionRecord = Schema.Struct({
+  operationId: ContainerOperationId,
+  message: ContainerGuestMessage,
+  launch: Schema.Struct({
+    commandId: CommandId,
+    threadId: ThreadId,
+    projectId: ProjectId,
+    title: Schema.String,
+    generateTitle: Schema.Literal(true),
+    modelSelection: ContainerGuestMessage.fields.modelSelection,
+    runtimeMode: ContainerGuestMessage.fields.runtimeMode,
+    interactionMode: ContainerGuestMessage.fields.interactionMode,
+    workspaceStrategy: Schema.Struct({ type: Schema.Literal("root") }),
+    initialMessage: Schema.Struct({
+      messageId: MessageId,
+      text: Schema.String,
+      attachments: Schema.Tuple([]),
+    }),
+    createdBy: Schema.Literal("user"),
+    creationSource: Schema.Literal("web"),
+  }),
+});
+export type SubmissionRecord = typeof SubmissionRecord.Type;
+const decodeSubmission = Schema.decodeEffect(Schema.fromJsonString(SubmissionRecord));
+const encodeSubmission = Schema.encodeEffect(Schema.fromJsonString(SubmissionRecord));
 
 export class ContainerRegistry extends Context.Service<
   ContainerRegistry,
@@ -53,6 +82,10 @@ export class ContainerRegistry extends Context.Service<
     readonly save: (record: WorkspaceRecord) => Effect.Effect<void, ContainerError>;
     readonly config: Effect.Effect<ContainerConfig | null, ContainerError>;
     readonly setConfig: (config: ContainerConfig) => Effect.Effect<void, ContainerError>;
+    readonly submission: (
+      id: ContainerOperationId,
+    ) => Effect.Effect<SubmissionRecord | null, ContainerError>;
+    readonly sealSubmission: (record: SubmissionRecord) => Effect.Effect<void, ContainerError>;
     readonly projectSetup: (
       id: ProjectId,
     ) => Effect.Effect<ProjectContainerSetupRecord | null, ContainerError>;
@@ -126,6 +159,15 @@ const make = Effect.gen(function* () {
     root,
     list,
     config: readConfig,
+    submission: Effect.fn("ContainerRegistry.submission")(function* (id) {
+      const path = join(root, `submission-${id}.json`);
+      if (!(yield* fs.exists(path))) return null;
+      return yield* decodeSubmission(yield* fs.readFileString(path));
+    }, wrap),
+    sealSubmission: Effect.fn("ContainerRegistry.sealSubmission")(function* (record) {
+      const text = yield* encodeSubmission(record).pipe(wrap);
+      yield* atomicWrite(join(root, `submission-${record.operationId}.json`), text);
+    }),
     projectSetup,
     projectCleanup,
     setProjectSetup: Effect.fn("ContainerRegistry.setProjectSetup")(function* (id, value) {

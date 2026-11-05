@@ -1,5 +1,7 @@
 import * as Schema from "effect/Schema";
-import { EnvironmentId, ProjectId } from "./baseSchemas.ts";
+import { EnvironmentId, ProjectId, ThreadId, RunId } from "./baseSchemas.ts";
+import { ModelSelection } from "./modelSelection.ts";
+import { RuntimeMode, ProviderInteractionMode } from "./providerPolicy.ts";
 import { AuthEnvironmentMaintainScope, AuthStandardClientScopes } from "./auth.ts";
 
 export const CONTAINER_GUEST_SCOPES = AuthStandardClientScopes.filter(
@@ -154,6 +156,36 @@ export const ContainerSettings = Schema.Struct({
   ),
 });
 export type ContainerSettings = typeof ContainerSettings.Type;
+export const ContainerGuestMessage = Schema.Struct({
+  projectId: ProjectId,
+  text: Schema.String.pipe(Schema.check(Schema.isMinLength(1))),
+  modelSelection: ModelSelection,
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode,
+});
+export type ContainerGuestMessage = typeof ContainerGuestMessage.Type;
+export const ContainerSubmissionInput = Schema.Struct({
+  operationId: ContainerOperationId,
+  message: ContainerGuestMessage,
+});
+export type ContainerSubmissionInput = typeof ContainerSubmissionInput.Type;
+export const ContainerSubmissionStatus = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("unseen") }),
+  Schema.Struct({ kind: Schema.Literal("reserved") }),
+  Schema.Struct({ kind: Schema.Literal("thread-created"), threadId: ThreadId }),
+  Schema.Struct({
+    kind: Schema.Literal("accepted"),
+    threadId: ThreadId,
+    runId: RunId,
+    sequence: Schema.Number,
+    preparation: Schema.Literals(["preparing", "blocked", "released"]),
+  }),
+  Schema.Struct({
+    kind: Schema.Literals(["provider-required", "rejected", "conflict"]),
+    reason: Schema.String,
+  }),
+]);
+export type ContainerSubmissionStatus = typeof ContainerSubmissionStatus.Type;
 export class ContainerError extends Schema.TaggedError<ContainerError>()("ContainerError", {
   stage: Schema.String,
   reason: Schema.Literals([

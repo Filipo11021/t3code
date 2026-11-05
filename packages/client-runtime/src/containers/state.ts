@@ -13,6 +13,14 @@ export function createContainerCommands<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
 ) {
   return {
+    submit: createEnvironmentRpcCommand(runtime, {
+      label: "containerGuest:submit",
+      tag: WS_METHODS.containerGuestSubmit,
+    }),
+    inspect: createEnvironmentRpcCommand(runtime, {
+      label: "containerGuest:inspect",
+      tag: WS_METHODS.containerGuestInspect,
+    }),
     connect: createRuntimeCommand(runtime, {
       label: "containers:connect",
       execute: Effect.fn("containers.connect")(function* (destination: ContainerDestination) {

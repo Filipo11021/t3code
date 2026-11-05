@@ -38,6 +38,8 @@ import {
   ContainerActionInput,
   ContainerConfigWrite,
   ConfigureProjectContainerInput,
+  ContainerSubmissionInput,
+  ContainerSubmissionStatus,
   ContainerDestination,
   ContainerError,
   ContainerListInput,
@@ -421,6 +423,8 @@ export const WS_METHODS = {
   containersSettings: "containers.settings",
   containersConfigure: "containers.configure",
   containersConfigureProject: "containers.configureProject",
+  containerGuestSubmit: "containerGuest.submit",
+  containerGuestInspect: "containerGuest.inspect",
   containersAct: "containers.act",
   containersCleanup: "containers.cleanup",
   projectsListEntries: "projects.listEntries",
@@ -2005,6 +2009,16 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
 ) {}
 
 export const WsRpcGroup = RpcGroup.make(
+  Rpc.make(WS_METHODS.containerGuestSubmit, {
+    payload: ContainerSubmissionInput,
+    success: ContainerSubmissionStatus,
+    error: ContainerError,
+  }),
+  Rpc.make(WS_METHODS.containerGuestInspect, {
+    payload: ContainerSubmissionInput,
+    success: ContainerSubmissionStatus,
+    error: ContainerError,
+  }),
   Rpc.make(WS_METHODS.containersOpen, {
     payload: OpenContainerInput,
     success: ContainerDestination,
