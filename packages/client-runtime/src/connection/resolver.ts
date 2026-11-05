@@ -54,6 +54,7 @@ import { fetchRemoteEnvironmentDescriptor } from "../environment/descriptor.ts";
 import { prepareContainerConnection } from "../containers/connection.ts";
 import * as Persistence from "../platform/persistence.ts";
 import * as PlatformConnectionSource from "../platform/source.ts";
+import * as ManagedRelay from "../relay/managedRelay.ts";
 
 export class ConnectionResolver extends Context.Service<
   ConnectionResolver,
@@ -274,6 +275,7 @@ export const make = Effect.gen(function* () {
   const relay = yield* makeRelayBroker();
   const ssh = yield* makeSshBroker();
   const httpClient = yield* HttpClient.HttpClient;
+  const signer = yield* Effect.serviceOption(ManagedRelay.ManagedRelayDpopSigner);
   const storage = yield* Effect.serviceOption(Persistence.ConnectionTargetStore);
   const platformSource = yield* Effect.serviceOption(
     PlatformConnectionSource.PlatformConnectionSource,
@@ -318,23 +320,34 @@ export const make = Effect.gen(function* () {
     const platforms = Option.isSome(platformSource)
       ? Option.getOrElse(yield* Stream.runHead(platformSource.value.registrations), () => [])
       : [];
-    const parent = [...platforms.map((entry) => entry.target), ...saved].find(
+    const parents = [...platforms.map((entry) => entry.target), ...saved].filter(
       (candidate) =>
         candidate.environmentId === target.hostEnvironmentId &&
         candidate._tag !== "ContainerConnectionTarget",
     );
-    if (!parent)
+    if (parents.length === 0)
       return yield* new ConnectionBlockedError({
         reason: "configuration",
         detail: "Connect this container's host first.",
       });
-    const profile =
-      parent._tag === "BearerConnectionTarget" || parent._tag === "SshConnectionTarget"
-        ? yield* profiles.get(parent.connectionId)
-        : Option.none();
-    const host = yield* authorizeHost({ target: parent, profile, enabled: true });
-    return yield* prepareContainerConnection(target, host).pipe(
-      Effect.provideService(HttpClient.HttpClient, httpClient),
+    return yield* Effect.firstSuccessOf(
+      parents.map((parent) =>
+        Effect.gen(function* () {
+          const profile =
+            parent._tag === "BearerConnectionTarget" || parent._tag === "SshConnectionTarget"
+              ? yield* profiles.get(parent.connectionId)
+              : Option.none();
+          const host = yield* authorizeHost({ target: parent, profile, enabled: true });
+          const connection = prepareContainerConnection(target, host).pipe(
+            Effect.provideService(HttpClient.HttpClient, httpClient),
+          );
+          return yield* Option.isSome(signer)
+            ? connection.pipe(
+                Effect.provideService(ManagedRelay.ManagedRelayDpopSigner, signer.value),
+              )
+            : connection;
+        }),
+      ),
     );
   });
 
