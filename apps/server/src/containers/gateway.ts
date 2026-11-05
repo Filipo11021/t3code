@@ -220,7 +220,6 @@ const guestHandler = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
   const auth = yield* EnvironmentAuth.EnvironmentAuth;
   const session = yield* auth.authenticateHttpRequest(request);
-  // Guest client sessions deliberately exclude host lifecycle authority.
   if (!session.scopes.includes("orchestration:operate"))
     return HttpServerResponse.empty({ status: 403 });
   const guest = yield* ContainerGuest.ContainerGuest;

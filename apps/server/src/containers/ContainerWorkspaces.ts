@@ -430,7 +430,8 @@ const make = Effect.gen(function* () {
     yield* guard;
     yield* Effect.try({
       try: () => ContainerRuntime.guestEnvironment(config),
-      catch: (cause) => new ContainerError({ stage: "environment", reason: "incompatible", cause }),
+      catch: (cause) =>
+        new ContainerError({ stage: "environment", reason: "invalid-environment", cause }),
     });
     yield* locks.withLock("configuration", registry.setConfig(config));
   });

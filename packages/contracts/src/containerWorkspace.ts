@@ -102,6 +102,7 @@ export class ContainerError extends Schema.TaggedError<ContainerError>()("Contai
     "runtime-required",
     "engine-failed",
     "invalid-checkout",
+    "invalid-environment",
     "incompatible",
     "not-found",
     "busy",
@@ -122,6 +123,8 @@ export class ContainerError extends Schema.TaggedError<ContainerError>()("Contai
         return `Container ${this.stage} failed. Check the container logs before retrying. Install retries may repeat partially completed work.`;
       case "invalid-checkout":
         return "The checkout or Git metadata cannot be safely mounted in a container.";
+      case "invalid-environment":
+        return "Container environment variables cannot override protected guest settings.";
       case "incompatible":
         return "The container no longer matches its recorded identity, mounts, or runtime.";
       case "not-found":

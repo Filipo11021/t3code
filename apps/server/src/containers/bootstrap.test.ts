@@ -34,7 +34,9 @@ describe("container bootstrap", () => {
     (key) => {
       expect(() =>
         guestEnvironment({ ...DEFAULT_CONTAINER_CONFIG, environment: { [key]: "unsafe" } }),
-      ).toThrow();
+      ).toThrowError(
+        expect.objectContaining({ stage: "environment", reason: "invalid-environment" }),
+      );
     },
   );
 });

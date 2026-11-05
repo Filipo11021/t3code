@@ -170,12 +170,9 @@ const make = Effect.gen(function* () {
   });
   const prepare = Effect.fn("GuestConnection.prepare")(function* (record: WorkspaceRecord) {
     const base = yield* origin(record);
-    // Bootstrap may still be installing OS prerequisites; only a real ready guest can issue a session.
-    const token = yield* credential(record, { seconds: 300, subject: "container-bootstrap" }).pipe(
-      Effect.retry(Schedule.max([Schedule.spaced("1 second"), Schedule.recurs(600)])),
-    );
     const identity = yield* Effect.scoped(
       Effect.gen(function* () {
+        const token = yield* credential(record, { seconds: 300, subject: "container-bootstrap" });
         const response = yield* http.execute(
           HttpClientRequest.post(`${base}/api/containers/guest/prepare`).pipe(
             HttpClientRequest.bearerToken(token),
@@ -187,7 +184,12 @@ const make = Effect.gen(function* () {
         return yield* decodeIdentity(yield* response.json);
       }),
     ).pipe(
-      Effect.retry(Schedule.max([Schedule.spaced("500 millis"), Schedule.recurs(60)])),
+      Effect.retry(Schedule.spaced("1 second")),
+      Effect.timeoutOrElse({
+        duration: "10 minutes",
+        orElse: () =>
+          Effect.fail(new ContainerError({ stage: "readiness", reason: "guest-failed" })),
+      }),
       Effect.mapError((cause) =>
         isContainerError(cause)
           ? cause

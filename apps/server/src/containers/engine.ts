@@ -69,7 +69,6 @@ const make = Effect.gen(function* () {
   const inspect = Effect.fn("ContainerEngine.inspect")(function* (name: string) {
     const result = yield* execute("inspect", ["container", "inspect", name]);
     if (result.code !== 0) {
-      // Distinguish a missing object from daemon/permission failures before recreating anything.
       yield* run("engine", ["info", "--format", "{{.ServerVersion}}"]);
       return null;
     }

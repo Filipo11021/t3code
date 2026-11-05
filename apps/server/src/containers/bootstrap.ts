@@ -35,7 +35,7 @@ const decodeManifest = Schema.decodeEffect(
 
 export function guestEnvironment(config: ContainerConfig): ReadonlyArray<string> {
   if (Object.keys(config.environment).some((key) => protectedVariables.test(key))) {
-    throw new ContainerError({ stage: "environment", reason: "incompatible" });
+    throw new ContainerError({ stage: "environment", reason: "invalid-environment" });
   }
   return Object.entries(config.environment).map(([key, value]) => `${key}=${value}`);
 }
