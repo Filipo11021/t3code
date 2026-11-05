@@ -154,10 +154,9 @@ export function useContainerWorkspacePicker(input: {
       setView(null);
     } catch (cause) {
       if (!controller.signal.aborted) setError(errorMessage(cause));
-    } finally {
-      setBusy(false);
-      active.current = null;
     }
+    setBusy(false);
+    active.current = null;
   };
   const menuItems = options.map((option) => (
     <MenuItem key={option.value} disabled={!allowed} onClick={() => void open(option.value)}>

@@ -1,6 +1,7 @@
 import type {
   EditorId,
   EnvironmentId,
+  ModelSelection,
   ProjectId,
   ProjectScript,
   ResolvedKeybindingsConfig,
@@ -53,6 +54,7 @@ interface ThreadDetailsPanelProps extends Pick<
   worktreePath: string | null;
   isServerThread: boolean;
   draftId?: DraftId;
+  containerModelSelection?: ModelSelection;
   activeProjectName: string | undefined;
   activeProjectScripts: ReadonlyArray<ProjectScript> | undefined;
   preferredScriptId: string | null;
@@ -102,6 +104,9 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
     worktreePath: props.worktreePath,
     isServerThread: props.isServerThread,
     ...(props.draftId ? { draftId: props.draftId } : {}),
+    ...(props.containerModelSelection
+      ? { containerModelSelection: props.containerModelSelection }
+      : {}),
     onEnvModeChange: props.onEnvModeChange,
     startFromOrigin: props.startFromOrigin,
     onStartFromOriginChange: props.onStartFromOriginChange,

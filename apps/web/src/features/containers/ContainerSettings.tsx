@@ -269,18 +269,18 @@ function ContainerSettingsForEnvironment({ environmentId }: { environmentId: Env
             disabled={pending || !allowed}
             onSave={async (config) => {
               setPending(true);
-              try {
-                const result = await runAtomCommand(
-                  registry,
-                  serverEnvironment.containers.configure,
-                  { environmentId, input: config },
-                  { reportFailure: false },
-                );
-                if (result._tag !== "Success") throw squashAtomCommandFailure(result);
-                await load();
-              } finally {
+              const result = await runAtomCommand(
+                registry,
+                serverEnvironment.containers.configure,
+                { environmentId, input: config },
+                { reportFailure: false },
+              );
+              if (result._tag !== "Success") {
                 setPending(false);
+                throw squashAtomCommandFailure(result);
               }
+              await load();
+              setPending(false);
             }}
           />
         ) : (
