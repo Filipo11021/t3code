@@ -1,4 +1,4 @@
-import { ContainerError, type ContainerConfig } from "@t3tools/contracts";
+import { ContainerError, type ContainerSetup } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
@@ -33,7 +33,7 @@ const decodeManifest = Schema.decodeEffect(
   ),
 );
 
-export function guestEnvironment(config: ContainerConfig): ReadonlyArray<string> {
+export function guestEnvironment(config: ContainerSetup): ReadonlyArray<string> {
   if (Object.keys(config.environment).some((key) => protectedVariables.test(key))) {
     throw new ContainerError({ stage: "environment", reason: "invalid-environment" });
   }
@@ -45,7 +45,7 @@ export function bootstrapScript(input: {
   readonly gid: number;
   readonly checkout: string;
   readonly revision: string;
-  readonly config: ContainerConfig;
+  readonly config: ContainerSetup;
 }): string {
   const environment = guestEnvironment(input.config).map(quote).join(" ");
   const userCommand = (command: string) =>

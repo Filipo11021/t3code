@@ -4,6 +4,12 @@ import {
   DEFAULT_CONTAINER_CONFIG,
   type ContainerActionInput,
   ContainerConfig,
+  ContainerSetup,
+  ContainerConfigurationRevision,
+  ContainerCleanupRules,
+  ContainerConfigWrite,
+  type ConfigureProjectContainerInput,
+  type ProjectId,
   type ContainerDestination,
   type ContainerListInput,
   type ContainerSettings,
@@ -16,6 +22,7 @@ import * as Clock from "effect/Clock";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Digest from "effect/crypto/Digest";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -37,7 +44,9 @@ import * as GuestConnection from "./GuestConnection.ts";
 
 type WorkspaceRecord = ContainerRegistry.WorkspaceRecord;
 const isContainerError = Schema.is(ContainerError);
-const encodeConfig = Schema.encodeEffect(Schema.fromJsonString(ContainerConfig));
+const encodeConfig = Schema.encodeEffect(Schema.fromJsonString(ContainerSetup));
+const decodeConfigWrite = Schema.decodeEffect(ContainerConfigWrite);
+const validCleanup = Schema.is(ContainerCleanupRules);
 export class ContainerWorkspaces extends Context.Service<
   ContainerWorkspaces,
   {
@@ -48,6 +57,9 @@ export class ContainerWorkspaces extends Context.Service<
       input: typeof ContainerListInput.Type,
     ) => Effect.Effect<ContainerSettings, ContainerError>;
     readonly configure: (config: ContainerConfig) => Effect.Effect<void, ContainerError>;
+    readonly configureProject: (
+      input: ConfigureProjectContainerInput,
+    ) => Effect.Effect<void, ContainerError>;
     readonly act: (
       input: ContainerActionInput,
     ) => Effect.Effect<ContainerWorkspace, ContainerError>;
@@ -85,6 +97,7 @@ const make = Effect.gen(function* () {
   const hostHome = yield* HostProcess.HomeDirectory;
   const { basename, isAbsolute, join, relative } = yield* Path.Path;
   const digest = yield* Digest.Digest;
+  const random = yield* SecureRandom.SecureRandom;
   const within = (root: string, path: string) => {
     const suffix = relative(root, path);
     return suffix === "" || (!suffix.startsWith("..") && !isAbsolute(suffix));
@@ -109,7 +122,7 @@ const make = Effect.gen(function* () {
     return record;
   });
   const mountsFor = Effect.fn("ContainerWorkspaces.mountsFor")(function* (
-    input: OpenContainerInput,
+    input: { readonly projectId: ProjectId; readonly checkoutPath: string },
     workspaceId: ContainerWorkspaceId,
   ) {
     const project = yield* projects
@@ -211,6 +224,14 @@ const make = Effect.gen(function* () {
           );
         const script = join(record.directory, "bootstrap.sh");
         yield* fs
+          .remove(join(home, `.installed-${record.runtimeRevision}`), { force: true })
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new ContainerError({ stage: "install-marker", reason: "persistence", cause }),
+            ),
+          );
+        yield* fs
           .writeFileString(
             script,
             ContainerRuntime.bootstrapScript({
@@ -293,8 +314,17 @@ const make = Effect.gen(function* () {
     return yield* locks.withLock(
       id,
       Effect.gen(function* () {
-        const mounted = yield* mountsFor(input, id);
         let record = (yield* registry.list).find((entry) => entry.id === id);
+        const mounted = yield* mountsFor(
+          {
+            projectId: input.projectId,
+            checkoutPath:
+              input.selection.type === "existing" && record
+                ? record.checkoutPath
+                : input.checkoutPath,
+          },
+          id,
+        );
         if (record) {
           if (
             record.ownerEnvironmentId !== owner ||
@@ -304,7 +334,16 @@ const make = Effect.gen(function* () {
             return yield* fail("reuse", "incompatible");
         } else {
           if (input.selection.type !== "fresh") return yield* fail("reuse", "not-found");
-          const config = (yield* registry.config) ?? DEFAULT_CONTAINER_CONFIG;
+          const config = yield* locks.withLock(
+            `project-setup:${input.projectId}`,
+            Effect.gen(function* () {
+              const setup = yield* registry.projectSetup(input.projectId);
+              if (!setup || !input.setupRevision) return yield* fail("setup", "setup-required");
+              if (setup.revision !== input.setupRevision)
+                return yield* fail("setup", "configuration-conflict");
+              return setup.value;
+            }),
+          );
           const directory = join(registry.root, id);
           const artifact = yield* runtime.stage(directory);
           const encoded = yield* encodeConfig(config).pipe(
@@ -351,7 +390,7 @@ const make = Effect.gen(function* () {
   });
   const act = Effect.fn("ContainerWorkspaces.act")(function* (
     input: ContainerActionInput,
-    inactiveBefore?: number,
+    automatic = false,
   ) {
     yield* guard;
     return yield* locks.withLock(
@@ -359,10 +398,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         let record = yield* find(input.workspaceId);
         if (record.ownership !== "managed") return yield* fail(input.action, "not-owned");
-        if (
-          inactiveBefore !== undefined &&
-          (record.lastUsedAt > inactiveBefore || leases.has(record.id))
-        )
+        if (automatic && (leases.has(record.id) || !(yield* cleanupEligible(record, input.action))))
           return asWorkspace(record);
         blocked.add(record.id);
         return yield* Effect.gen(function* () {
@@ -381,6 +417,8 @@ const make = Effect.gen(function* () {
               return yield* fail("identity", "incompatible");
             if (inspected.State.Running) {
               if (!(yield* guests.idle(record))) return yield* fail("idle", "busy");
+              if (automatic && !(yield* cleanupEligible(record, input.action)))
+                return asWorkspace(record);
               yield* engine.run("stop", [
                 "stop",
                 "--time",
@@ -388,6 +426,8 @@ const make = Effect.gen(function* () {
                 GuestConnection.containerName(record.id),
               ]);
             }
+            if (automatic && !(yield* cleanupEligible(record, input.action)))
+              return asWorkspace(record);
             if (input.action === "remove-runtime")
               yield* engine.run("remove", ["rm", GuestConnection.containerName(record.id)]);
           }
@@ -416,6 +456,15 @@ const make = Effect.gen(function* () {
     return {
       config: (yield* registry.config) ?? DEFAULT_CONTAINER_CONFIG,
       available: guestMode !== "1",
+      ...(input.projectId === undefined
+        ? {}
+        : {
+            project: {
+              projectId: input.projectId,
+              setup: yield* registry.projectSetup(input.projectId),
+              cleanup: yield* registry.projectCleanup(input.projectId),
+            },
+          }),
       workspaces: records
         .filter(
           (record) =>
@@ -428,12 +477,53 @@ const make = Effect.gen(function* () {
   });
   const configure = Effect.fn("ContainerWorkspaces.configure")(function* (config: ContainerConfig) {
     yield* guard;
+    yield* decodeConfigWrite(config).pipe(
+      Effect.mapError(
+        (cause) => new ContainerError({ stage: "cleanup", reason: "incompatible", cause }),
+      ),
+    );
     yield* Effect.try({
       try: () => ContainerRuntime.guestEnvironment(config),
       catch: (cause) =>
         new ContainerError({ stage: "environment", reason: "invalid-environment", cause }),
     });
     yield* locks.withLock("configuration", registry.setConfig(config));
+  });
+  const configureProject = Effect.fn("ContainerWorkspaces.configureProject")(function* (
+    input: ConfigureProjectContainerInput,
+  ) {
+    yield* guard;
+    const project = yield* projects
+      .getById(input.projectId)
+      .pipe(
+        Effect.mapError(
+          (cause) => new ContainerError({ stage: "project", reason: "not-found", cause }),
+        ),
+      );
+    if (Option.isNone(project) || project.value.deletedAt !== null)
+      return yield* fail("project", "not-found");
+    yield* locks.withLock(
+      `project-${input.kind}:${input.projectId}`,
+      Effect.gen(function* () {
+        const current =
+          input.kind === "setup"
+            ? yield* registry.projectSetup(input.projectId)
+            : yield* registry.projectCleanup(input.projectId);
+        if ((current?.revision ?? null) !== input.expectedRevision)
+          return yield* fail("configuration", "configuration-conflict");
+        const revision = ContainerConfigurationRevision.make(yield* random.uuidV4());
+        if (input.kind === "setup") {
+          yield* Effect.try({
+            try: () => ContainerRuntime.guestEnvironment(input.value),
+            catch: (cause) =>
+              new ContainerError({ stage: "environment", reason: "invalid-environment", cause }),
+          });
+          yield* registry.setProjectSetup(input.projectId, { revision, value: input.value });
+        } else {
+          yield* registry.setProjectCleanup(input.projectId, { revision, value: input.value });
+        }
+      }),
+    );
   });
   const route = Effect.fn("ContainerWorkspaces.route")(function* (id: ContainerWorkspaceId) {
     yield* guard;
@@ -468,10 +558,35 @@ const make = Effect.gen(function* () {
       }),
     );
   });
+  const cleanupEligible = Effect.fn("ContainerWorkspaces.cleanupEligible")(function* (
+    record: WorkspaceRecord,
+    action: ContainerActionInput["action"],
+  ) {
+    const project = yield* projects
+      .getById(record.projectId)
+      .pipe(
+        Effect.mapError(
+          (cause) => new ContainerError({ stage: "cleanup-project", reason: "not-found", cause }),
+        ),
+      );
+    if (Option.isNone(project) || project.value.deletedAt !== null || leases.has(record.id))
+      return false;
+    const override = yield* registry.projectCleanup(record.projectId);
+    if (override?.value.kind === "off") return false;
+    const rules =
+      override?.value.kind === "custom"
+        ? override.value.rules
+        : ((yield* registry.config) ?? DEFAULT_CONTAINER_CONFIG).cleanup;
+    if (!validCleanup(rules)) return false;
+    const retention = action === "remove-runtime" ? rules.removeAfterDays : rules.idleStopMinutes;
+    if (retention === null) return false;
+    return (
+      (yield* Clock.currentTimeMillis) - record.lastUsedAt >=
+      retention * (action === "remove-runtime" ? 86_400_000 : 60_000)
+    );
+  });
   const cleanup = Effect.gen(function* () {
     yield* guard;
-    const config = (yield* registry.config) ?? DEFAULT_CONTAINER_CONFIG;
-    const now = yield* Clock.currentTimeMillis;
     for (const record of yield* registry.list) {
       if (
         record.ownership !== "managed" ||
@@ -479,29 +594,29 @@ const make = Effect.gen(function* () {
         leases.has(record.id)
       )
         continue;
-      const idleMs = now - record.lastUsedAt;
-      const remove =
-        config.cleanup.removeAfterDays !== null &&
-        idleMs >= config.cleanup.removeAfterDays * 86_400_000;
-      const stop =
-        config.cleanup.idleStopMinutes !== null &&
-        idleMs >= config.cleanup.idleStopMinutes * 60_000;
+      const remove = yield* cleanupEligible(record, "remove-runtime");
+      const stop = yield* cleanupEligible(record, "stop");
       if (
         (remove && record.status.type !== "removed") ||
         (stop && record.status.type === "ready")
       ) {
-        const retention = remove
-          ? (config.cleanup.removeAfterDays ?? Infinity) * 86_400_000
-          : (config.cleanup.idleStopMinutes ?? Infinity) * 60_000;
         yield* act(
           { workspaceId: record.id, action: remove ? "remove-runtime" : "stop" },
-          now - retention,
+          true,
         ).pipe(Effect.ignore);
       }
     }
   });
   if (guestMode !== "1")
     yield* forkParked(cleanup.pipe(Effect.ignore, Effect.repeat(Schedule.spaced("5 minutes"))));
-  return ContainerWorkspaces.of({ open, act, settings, configure, route, cleanup });
+  return ContainerWorkspaces.of({
+    open,
+    act,
+    settings,
+    configure,
+    configureProject,
+    route,
+    cleanup,
+  });
 });
 export const layer = Layer.effect(ContainerWorkspaces, make);

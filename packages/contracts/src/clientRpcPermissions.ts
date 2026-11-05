@@ -20,6 +20,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.containersOpen]: AuthEnvironmentMaintainScope,
   [WS_METHODS.containersSettings]: AuthEnvironmentMaintainScope,
   [WS_METHODS.containersConfigure]: AuthEnvironmentMaintainScope,
+  [WS_METHODS.containersConfigureProject]: AuthEnvironmentMaintainScope,
   [WS_METHODS.containersAct]: AuthEnvironmentMaintainScope,
   [WS_METHODS.containersCleanup]: AuthEnvironmentMaintainScope,
   [WS_METHODS.previewClose]: AuthPreviewOperateScope,

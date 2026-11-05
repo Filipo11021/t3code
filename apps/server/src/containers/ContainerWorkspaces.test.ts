@@ -11,9 +11,14 @@ import {
 } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
+import * as Option from "effect/Option";
+import * as Scope from "effect/Scope";
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ProjectService from "../project/ProjectService.ts";
@@ -47,6 +52,9 @@ const fixture = Effect.gen(function* () {
     deletedAt: null,
   };
   const commands: Array<ReadonlyArray<string>> = [];
+  const projects = new Map([[projectId, project]]);
+  let stageHook = Effect.void;
+  let idleHook = Effect.void;
   const objects = new Map<string, Engine.Inspection>();
   let busy = false;
   let failure = false;
@@ -96,7 +104,7 @@ const fixture = Effect.gen(function* () {
               projectId: ProjectId.make("guest-project"),
             });
       }),
-    idle: () => Effect.sync(() => !busy),
+    idle: () => idleHook.pipe(Effect.andThen(Effect.sync(() => !busy))),
   });
   const layers = ContainerWorkspaces.layer.pipe(
     Layer.provideMerge(Registry.layer),
@@ -104,11 +112,15 @@ const fixture = Effect.gen(function* () {
     Layer.provide(Layer.succeed(Guest.GuestConnection, guest)),
     Layer.provide(
       Layer.mock(Runtime.ContainerRuntime)({
-        stage: (directory) => Effect.succeed({ path: directory, revision: "bundled-revision" }),
+        stage: (directory) =>
+          stageHook.pipe(Effect.as({ path: directory, revision: "bundled-revision" })),
       }),
     ),
     Layer.provide(
-      Layer.mock(ProjectService.ProjectService)({ getById: () => Effect.succeedSome(project) }),
+      Layer.mock(ProjectService.ProjectService)({
+        getById: (id) =>
+          Effect.sync(() => (projects.has(id) ? Option.some(projects.get(id)!) : Option.none())),
+      }),
     ),
     Layer.provide(
       Layer.mock(ServerEnvironment.ServerEnvironment)({
@@ -141,6 +153,13 @@ const fixture = Effect.gen(function* () {
     input,
     commands,
     objects,
+    projects,
+    stage: (hook: Effect.Effect<void>) => {
+      stageHook = hook;
+    },
+    idle: (hook: Effect.Effect<void>) => {
+      idleHook = hook;
+    },
     busy: (value: boolean) => {
       busy = value;
     },
@@ -150,12 +169,189 @@ const fixture = Effect.gen(function* () {
     identities: () => identities,
   };
 });
+const confirmedFixture = Effect.gen(function* () {
+  const f = yield* fixture;
+  yield* f.service.configureProject({
+    kind: "setup",
+    projectId: f.input.projectId,
+    expectedRevision: null,
+    value: DEFAULT_CONTAINER_CONFIG,
+  });
+  const setup = (yield* f.service.settings({ projectId: f.input.projectId })).project!.setup!;
+  return { ...f, input: { ...f.input, setupRevision: setup.revision } };
+});
+
+it.effect(
+  "requires explicit project confirmation, pins setup revisions and reuses the recorded checkout",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      expect(
+        (yield* f.service.settings({ projectId: f.input.projectId })).project?.setup,
+      ).toBeNull();
+      expect(yield* f.service.open(f.input).pipe(Effect.flip)).toMatchObject({
+        reason: "setup-required",
+      });
+      expect(f.commands).toEqual([]);
+      yield* f.service.configureProject({
+        kind: "setup",
+        projectId: f.input.projectId,
+        expectedRevision: null,
+        value: DEFAULT_CONTAINER_CONFIG,
+      });
+      const confirmed = (yield* f.service.settings({ projectId: f.input.projectId })).project!
+        .setup!;
+      expect(confirmed.value.installScript).toBe("");
+      const input = { ...f.input, setupRevision: confirmed.revision };
+      yield* f.service.configureProject({
+        kind: "setup",
+        projectId: f.input.projectId,
+        expectedRevision: confirmed.revision,
+        value: { ...confirmed.value, installScript: "changed" },
+      });
+      expect(yield* f.service.open(input).pipe(Effect.flip)).toMatchObject({
+        reason: "configuration-conflict",
+      });
+      const current = (yield* f.service.settings({ projectId: f.input.projectId })).project!.setup!;
+      yield* f.service.open({ ...input, setupRevision: current.revision });
+      yield* f.service.configureProject({
+        kind: "setup",
+        projectId: f.input.projectId,
+        expectedRevision: current.revision,
+        value: confirmed.value,
+      });
+      yield* f.service.open({ ...input, setupRevision: current.revision });
+      expect((yield* f.registry.list)[0]?.config.installScript).toBe("changed");
+      yield* f.service.open({
+        ...f.input,
+        checkoutPath: "/not-the-recorded-checkout",
+        selection: {
+          type: "existing",
+          workspaceId: ContainerWorkspaceId.make(f.input.operationId),
+        },
+      });
+      expect(f.commands.filter((args) => args[0] === "create")).toHaveLength(1);
+    }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+);
+
+it.effect(
+  "captures setup before runtime staging without blocking project edits and isolates project records",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* confirmedFixture;
+      const entered = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      f.stage(Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release))));
+      const opening = yield* f.service.open(f.input).pipe(Effect.forkChild);
+      yield* Deferred.await(entered);
+      yield* f.service.configureProject({
+        kind: "setup",
+        projectId: f.input.projectId,
+        expectedRevision: f.input.setupRevision,
+        value: { ...DEFAULT_CONTAINER_CONFIG, startScript: "new" },
+      });
+      yield* Deferred.succeed(release, undefined);
+      yield* Fiber.join(opening);
+      expect((yield* f.registry.list)[0]?.config.startScript).toBe("");
+      const otherId = ProjectId.make("other/project");
+      f.projects.set(otherId, { ...f.projects.get(f.input.projectId)!, id: otherId });
+      expect((yield* f.service.settings({ projectId: otherId })).project?.setup).toBeNull();
+      expect(
+        yield* f.service
+          .open({
+            ...f.input,
+            projectId: otherId,
+            operationId: ContainerOperationId.make("other-operation"),
+          })
+          .pipe(Effect.flip),
+      ).toMatchObject({ reason: "setup-required" });
+      expect(
+        yield* f.service
+          .configureProject({
+            kind: "setup",
+            projectId: f.input.projectId,
+            expectedRevision: f.input.setupRevision,
+            value: DEFAULT_CONTAINER_CONFIG,
+          })
+          .pipe(Effect.flip),
+      ).toMatchObject({ reason: "configuration-conflict" });
+    }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+);
+
+it.effect(
+  "uses live recorded-project cleanup and retains leased, orphaned and unsafe legacy-policy runtimes",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* confirmedFixture;
+      const destination = yield* f.service.open(f.input);
+      const record = (yield* f.registry.list)[0]!;
+      yield* f.registry.save({ ...record, lastUsedAt: -2 * 86_400_000 });
+      yield* f.service.configure({
+        ...DEFAULT_CONTAINER_CONFIG,
+        cleanup: { idleStopMinutes: 1, removeAfterDays: 1 },
+      });
+      yield* f.service.configureProject({
+        kind: "cleanup",
+        projectId: f.input.projectId,
+        expectedRevision: null,
+        value: { kind: "off" },
+      });
+      yield* f.service.cleanup;
+      expect(f.objects.size).toBe(1);
+      const cleanup = (yield* f.service.settings({ projectId: f.input.projectId })).project!
+        .cleanup!;
+      yield* f.service.configureProject({
+        kind: "cleanup",
+        projectId: f.input.projectId,
+        expectedRevision: cleanup.revision,
+        value: { kind: "inherit" },
+      });
+      const leaseScope = yield* Scope.make();
+      yield* f.service
+        .route(destination.workspaceId)
+        .pipe(Effect.provideService(Scope.Scope, leaseScope));
+      yield* f.service.cleanup;
+      expect(f.objects.size).toBe(1);
+      yield* Scope.close(leaseScope, Exit.void);
+      yield* f.registry.save({ ...record, lastUsedAt: -2 * 86_400_000 });
+      const project = f.projects.get(f.input.projectId)!;
+      f.projects.delete(f.input.projectId);
+      yield* f.service.cleanup;
+      expect(f.objects.size).toBe(1);
+      f.projects.set(f.input.projectId, project);
+      yield* f.registry.setConfig({
+        ...DEFAULT_CONTAINER_CONFIG,
+        cleanup: { idleStopMinutes: 525601, removeAfterDays: 3651 },
+      });
+      yield* f.service.cleanup;
+      expect(f.objects.size).toBe(1);
+      yield* f.service.configure({
+        ...DEFAULT_CONTAINER_CONFIG,
+        cleanup: { idleStopMinutes: 1, removeAfterDays: 1 },
+      });
+      const inherited = (yield* f.service.settings({ projectId: f.input.projectId })).project!
+        .cleanup!;
+      f.idle(
+        f.service
+          .configureProject({
+            kind: "cleanup",
+            projectId: f.input.projectId,
+            expectedRevision: inherited.revision,
+            value: { kind: "off" },
+          })
+          .pipe(Effect.orDie),
+      );
+      yield* f.service.cleanup;
+      expect(f.objects.size).toBe(1);
+      expect(f.commands.filter((args) => args[0] === "stop")).toHaveLength(0);
+    }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+);
 
 it.effect(
   "converges concurrent/retried opens, reuses stopped guests and retains history after runtime removal",
   () =>
     Effect.gen(function* () {
-      const f = yield* fixture;
+      const f = yield* confirmedFixture;
       const destinations = yield* Effect.all([f.service.open(f.input), f.service.open(f.input)], {
         concurrency: "unbounded",
       });
@@ -168,6 +364,11 @@ it.effect(
       ).toBe("Failure");
       expect(f.objects.size).toBe(1);
       f.busy(false);
+      const fs = yield* FileSystem.FileSystem;
+      const initial = (yield* f.registry.list)[0]!;
+      const marker = `${initial.directory}/home/.installed-${initial.runtimeRevision}`;
+      yield* fs.writeFileString(marker, "success");
+      yield* fs.writeFileString(`${initial.directory}/home/history-sentinel`, "retained");
       yield* f.service.act({ workspaceId, action: "stop" });
       const reused = yield* f.service.open({
         ...f.input,
@@ -175,6 +376,7 @@ it.effect(
       });
       expect(reused).toEqual(destinations[0]);
       expect(f.commands.filter((args) => args[0] === "create")).toHaveLength(1);
+      expect(yield* fs.exists(marker)).toBe(true);
       const removed = yield* f.service.act({ workspaceId, action: "remove-runtime" });
       expect(removed.status).toEqual({ type: "removed", retainedData: true });
       const before = (yield* f.registry.list)[0]!;
@@ -189,7 +391,13 @@ it.effect(
         selection: { type: "existing", workspaceId },
       });
       expect(recreated.guestEnvironmentId).toBe(destinations[0]?.guestEnvironmentId);
-      expect((yield* f.registry.list)[0]?.config).toEqual(DEFAULT_CONTAINER_CONFIG);
+      expect(yield* fs.exists(marker)).toBe(false);
+      expect(yield* fs.readFileString(`${initial.directory}/home/history-sentinel`)).toBe(
+        "retained",
+      );
+      expect((yield* f.registry.list)[0]?.config).toEqual(
+        (yield* f.service.settings({ projectId: f.input.projectId })).project!.setup!.value,
+      );
       expect(f.commands.filter((args) => args[0] === "create")).toHaveLength(2);
       yield* f.service.configure({
         ...DEFAULT_CONTAINER_CONFIG,
@@ -211,7 +419,7 @@ it.effect(
   "preserves failed installation for explicit retry, snapshots config and refuses external ownership or replaced objects",
   () =>
     Effect.gen(function* () {
-      const f = yield* fixture;
+      const f = yield* confirmedFixture;
       f.fail(true);
       expect((yield* f.service.open(f.input).pipe(Effect.result))._tag).toBe("Failure");
       expect((yield* f.registry.list)[0]?.status.type).toBe("failed");

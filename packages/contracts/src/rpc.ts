@@ -36,7 +36,8 @@ import {
 import * as Schema from "effect/Schema";
 import {
   ContainerActionInput,
-  ContainerConfig,
+  ContainerConfigWrite,
+  ConfigureProjectContainerInput,
   ContainerDestination,
   ContainerError,
   ContainerListInput,
@@ -419,6 +420,7 @@ export const WS_METHODS = {
   containersOpen: "containers.open",
   containersSettings: "containers.settings",
   containersConfigure: "containers.configure",
+  containersConfigureProject: "containers.configureProject",
   containersAct: "containers.act",
   containersCleanup: "containers.cleanup",
   projectsListEntries: "projects.listEntries",
@@ -2013,7 +2015,14 @@ export const WsRpcGroup = RpcGroup.make(
     success: ContainerSettings,
     error: ContainerError,
   }),
-  Rpc.make(WS_METHODS.containersConfigure, { payload: ContainerConfig, error: ContainerError }),
+  Rpc.make(WS_METHODS.containersConfigure, {
+    payload: ContainerConfigWrite,
+    error: ContainerError,
+  }),
+  Rpc.make(WS_METHODS.containersConfigureProject, {
+    payload: ConfigureProjectContainerInput,
+    error: ContainerError,
+  }),
   Rpc.make(WS_METHODS.containersAct, {
     payload: ContainerActionInput,
     success: ContainerWorkspace,

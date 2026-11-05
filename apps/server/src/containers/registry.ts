@@ -5,6 +5,9 @@ import {
   ContainerWorkspace,
   EnvironmentId,
   ProjectId,
+  ContainerSetup,
+  ProjectContainerSetupRecord,
+  ProjectContainerCleanupRecord,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -18,7 +21,7 @@ export const WorkspaceRecord = Schema.Struct({
   ...ContainerWorkspace.fields,
   operationId: ContainerOperationId,
   ownerEnvironmentId: EnvironmentId,
-  config: ContainerConfig,
+  config: ContainerSetup,
   runtimeRevision: Schema.String,
   runtimePath: Schema.String,
   directory: Schema.String,
@@ -37,6 +40,10 @@ const decodeRecord = Schema.decodeEffect(Schema.fromJsonString(WorkspaceRecord))
 const encodeRecord = Schema.encodeEffect(Schema.fromJsonString(WorkspaceRecord));
 const decodeConfig = Schema.decodeEffect(Schema.fromJsonString(ContainerConfig));
 const encodeConfig = Schema.encodeEffect(Schema.fromJsonString(ContainerConfig));
+const decodeSetup = Schema.decodeEffect(Schema.fromJsonString(ProjectContainerSetupRecord));
+const encodeSetup = Schema.encodeEffect(Schema.fromJsonString(ProjectContainerSetupRecord));
+const decodeCleanup = Schema.decodeEffect(Schema.fromJsonString(ProjectContainerCleanupRecord));
+const encodeCleanup = Schema.encodeEffect(Schema.fromJsonString(ProjectContainerCleanupRecord));
 
 export class ContainerRegistry extends Context.Service<
   ContainerRegistry,
@@ -46,6 +53,20 @@ export class ContainerRegistry extends Context.Service<
     readonly save: (record: WorkspaceRecord) => Effect.Effect<void, ContainerError>;
     readonly config: Effect.Effect<ContainerConfig | null, ContainerError>;
     readonly setConfig: (config: ContainerConfig) => Effect.Effect<void, ContainerError>;
+    readonly projectSetup: (
+      id: ProjectId,
+    ) => Effect.Effect<ProjectContainerSetupRecord | null, ContainerError>;
+    readonly projectCleanup: (
+      id: ProjectId,
+    ) => Effect.Effect<ProjectContainerCleanupRecord | null, ContainerError>;
+    readonly setProjectSetup: (
+      id: ProjectId,
+      value: ProjectContainerSetupRecord,
+    ) => Effect.Effect<void, ContainerError>;
+    readonly setProjectCleanup: (
+      id: ProjectId,
+      value: ProjectContainerCleanupRecord,
+    ) => Effect.Effect<void, ContainerError>;
   }
 >()("t3/containers/registry/ContainerRegistry") {}
 
@@ -89,10 +110,32 @@ const make = Effect.gen(function* () {
       return yield* decodeConfig(yield* fs.readFileString(path));
     }),
   );
+  const projectPath = (kind: "setup" | "cleanup", id: ProjectId) =>
+    join(root, `project-${Buffer.from(id).toString("base64url")}-${kind}.json`);
+  const projectSetup = Effect.fn("ContainerRegistry.projectSetup")(function* (id: ProjectId) {
+    const path = projectPath("setup", id);
+    if (!(yield* fs.exists(path))) return null;
+    return yield* decodeSetup(yield* fs.readFileString(path));
+  }, wrap);
+  const projectCleanup = Effect.fn("ContainerRegistry.projectCleanup")(function* (id: ProjectId) {
+    const path = projectPath("cleanup", id);
+    if (!(yield* fs.exists(path))) return null;
+    return yield* decodeCleanup(yield* fs.readFileString(path));
+  }, wrap);
   return ContainerRegistry.of({
     root,
     list,
     config: readConfig,
+    projectSetup,
+    projectCleanup,
+    setProjectSetup: Effect.fn("ContainerRegistry.setProjectSetup")(function* (id, value) {
+      const text = yield* encodeSetup(value).pipe(wrap);
+      yield* atomicWrite(projectPath("setup", id), text);
+    }),
+    setProjectCleanup: Effect.fn("ContainerRegistry.setProjectCleanup")(function* (id, value) {
+      const text = yield* encodeCleanup(value).pipe(wrap);
+      yield* atomicWrite(projectPath("cleanup", id), text);
+    }),
     save: Effect.fn("ContainerRegistry.save")(function* (record) {
       const text = yield* encodeRecord(record).pipe(wrap);
       yield* atomicWrite(join(root, `${record.id}.workspace.json`), text);

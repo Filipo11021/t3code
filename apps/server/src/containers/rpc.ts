@@ -8,6 +8,7 @@ export const handlers = Effect.gen(function* () {
     [WS_METHODS.containersOpen]: service.open,
     [WS_METHODS.containersSettings]: service.settings,
     [WS_METHODS.containersConfigure]: service.configure,
+    [WS_METHODS.containersConfigureProject]: service.configureProject,
     [WS_METHODS.containersAct]: service.act,
     [WS_METHODS.containersCleanup]: () => service.cleanup,
   };

@@ -22,7 +22,7 @@ export const ContainerOperationId = Schema.String.pipe(
 export type ContainerOperationId = typeof ContainerOperationId.Type;
 
 const Retention = Schema.NullOr(Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))));
-export const ContainerConfig = Schema.Struct({
+export const ContainerSetup = Schema.Struct({
   image: Schema.String.pipe(Schema.check(Schema.isMinLength(1))),
   installScript: Schema.String,
   startScript: Schema.String,
@@ -30,9 +30,60 @@ export const ContainerConfig = Schema.Struct({
     Schema.String.pipe(Schema.check(Schema.isPattern(/^[A-Za-z_][A-Za-z0-9_]*$/))),
     Schema.String,
   ),
+});
+export type ContainerSetup = typeof ContainerSetup.Type;
+export const ContainerConfig = Schema.Struct({
+  ...ContainerSetup.fields,
   cleanup: Schema.Struct({ idleStopMinutes: Retention, removeAfterDays: Retention }),
 });
 export type ContainerConfig = typeof ContainerConfig.Type;
+const CONTAINER_MAX_REMOVAL_DAYS = 3650;
+const CONTAINER_MAX_IDLE_MINUTES = 525600;
+const boundedRetention = (maximum: number) =>
+  Schema.NullOr(Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 1, maximum }))));
+export const ContainerCleanupRules = Schema.Struct({
+  idleStopMinutes: boundedRetention(CONTAINER_MAX_IDLE_MINUTES),
+  removeAfterDays: boundedRetention(CONTAINER_MAX_REMOVAL_DAYS),
+});
+export type ContainerCleanupRules = typeof ContainerCleanupRules.Type;
+export const ContainerConfigWrite = Schema.Struct({
+  ...ContainerSetup.fields,
+  cleanup: ContainerCleanupRules,
+});
+export const ContainerConfigurationRevision = Schema.String.pipe(
+  Schema.brand("ContainerConfigurationRevision"),
+);
+export const ProjectContainerCleanup = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("inherit") }),
+  Schema.Struct({ kind: Schema.Literal("off") }),
+  Schema.Struct({ kind: Schema.Literal("custom"), rules: ContainerCleanupRules }),
+]);
+export type ProjectContainerCleanup = typeof ProjectContainerCleanup.Type;
+export const ProjectContainerSetupRecord = Schema.Struct({
+  revision: ContainerConfigurationRevision,
+  value: ContainerSetup,
+});
+export type ProjectContainerSetupRecord = typeof ProjectContainerSetupRecord.Type;
+export const ProjectContainerCleanupRecord = Schema.Struct({
+  revision: ContainerConfigurationRevision,
+  value: ProjectContainerCleanup,
+});
+export type ProjectContainerCleanupRecord = typeof ProjectContainerCleanupRecord.Type;
+export const ConfigureProjectContainerInput = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("setup"),
+    projectId: ProjectId,
+    expectedRevision: Schema.NullOr(ContainerConfigurationRevision),
+    value: ContainerSetup,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("cleanup"),
+    projectId: ProjectId,
+    expectedRevision: Schema.NullOr(ContainerConfigurationRevision),
+    value: ProjectContainerCleanup,
+  }),
+]);
+export type ConfigureProjectContainerInput = typeof ConfigureProjectContainerInput.Type;
 export const DEFAULT_CONTAINER_CONFIG: ContainerConfig = {
   image: "ubuntu:26.04",
   installScript: "",
@@ -51,6 +102,7 @@ export const OpenContainerInput = Schema.Struct({
   projectId: ProjectId,
   checkoutPath: Schema.String,
   selection: ContainerSelection,
+  setupRevision: Schema.optionalKey(ContainerConfigurationRevision),
 });
 export type OpenContainerInput = typeof OpenContainerInput.Type;
 export const ContainerDestination = Schema.Struct({
@@ -93,6 +145,13 @@ export const ContainerSettings = Schema.Struct({
   config: ContainerConfig,
   workspaces: Schema.Array(ContainerWorkspace),
   available: Schema.Boolean,
+  project: Schema.optionalKey(
+    Schema.Struct({
+      projectId: ProjectId,
+      setup: Schema.NullOr(ProjectContainerSetupRecord),
+      cleanup: Schema.NullOr(ProjectContainerCleanupRecord),
+    }),
+  ),
 });
 export type ContainerSettings = typeof ContainerSettings.Type;
 export class ContainerError extends Schema.TaggedError<ContainerError>()("ContainerError", {
@@ -110,6 +169,8 @@ export class ContainerError extends Schema.TaggedError<ContainerError>()("Contai
     "persistence",
     "guest-failed",
     "disabled",
+    "setup-required",
+    "configuration-conflict",
   ]),
   cause: Schema.optionalKey(Schema.Defect()),
 }) {
@@ -139,6 +200,10 @@ export class ContainerError extends Schema.TaggedError<ContainerError>()("Contai
         return `The guest did not complete ${this.stage}. The source draft is unchanged.`;
       case "disabled":
         return "Container workspaces are unavailable inside a guest.";
+      case "setup-required":
+        return "Confirm this project's container environment before creating a container.";
+      case "configuration-conflict":
+        return "Container project settings changed. Reload them before continuing.";
     }
   }
 }

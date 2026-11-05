@@ -231,6 +231,7 @@ export const make = Effect.gen(function* () {
       threadAutoSettlement: true,
       storageCleanup: true,
       containerWorkspaces: process.env.T3CODE_CONTAINER_GUEST !== "1",
+      containerProjects: process.env.T3CODE_CONTAINER_GUEST !== "1",
       storageCleanupRun: true,
       databaseStorage: true,
       otlpEndpointCheck: true,

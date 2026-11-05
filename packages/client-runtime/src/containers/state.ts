@@ -67,6 +67,10 @@ export function createContainerCommands<R, E>(
       label: "containers:configure",
       tag: WS_METHODS.containersConfigure,
     }),
+    configureProject: createEnvironmentRpcCommand(runtime, {
+      label: "containers:configure-project",
+      tag: WS_METHODS.containersConfigureProject,
+    }),
     act: createEnvironmentRpcCommand(runtime, {
       label: "containers:act",
       tag: WS_METHODS.containersAct,
