@@ -63,6 +63,7 @@ function fixture(confirmed = true) {
     guestEnvironmentId: EnvironmentId.make("guest"),
     guestProjectId: ProjectId.make("guest-project"),
     guestCheckoutPath: "/recorded-checkout",
+    runtime: "docker" as const,
     label: "Test container",
   };
   const provider: ServerProvider = {
@@ -120,6 +121,11 @@ function fixture(confirmed = true) {
       if (settingsFailure) throw new Error("settings failed");
       return {
         config: DEFAULT_CONTAINER_CONFIG,
+        runtime: { default: "docker", project: null, resolved: "docker" },
+        runtimes: [
+          { runtime: "docker", available: true, version: "test", detail: null, checkedAt: 0 },
+          { runtime: "podman", available: true, version: "test", detail: null, checkedAt: 0 },
+        ],
         available: true,
         workspaces: [],
         project: {

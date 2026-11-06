@@ -408,6 +408,15 @@ removed runtime is recreated. The finite start script must finish before T3 is r
 Runtime removal keeps source files, guest home and history. Busy, unknown and unreachable
 guests are retained. Schedules do not wake a stopped container.
 
+Docker and Podman are container runtime providers. **Settings > Containers** shows whether
+each is installed and responding on the host. The environment default selects the runtime
+for new containers, and a project can override it. Existing containers keep their recorded
+runtime, shown in the workspace menu and card. If that runtime is unavailable, start it or
+change the container to an available runtime. A runtime change recreates the container on
+the other provider and keeps the checkout, guest home, installed packages and threads. If
+the old runtime cannot be reached when you change, T3 removes its container later when that
+runtime is available again.
+
 Container access requires full host maintenance permissions. Native mobile does not yet
 offer container creation or setup. Guest provider OAuth callbacks that require a
 separate localhost listener are not forwarded; use the provider's supported device-code

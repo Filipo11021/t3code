@@ -229,7 +229,10 @@ describe("containers feature toggle", () => {
       .map((item) => item.id)
       .filter(
         (id) =>
-          id === "container-setup" || id === "container-runtimes" || id === "containers-feature",
+          id === "container-runtime-setting" ||
+          id === "container-setup" ||
+          id === "container-runtimes" ||
+          id === "containers-feature",
       );
 
   it("keeps the Containers page in the sidebar only while the feature is on", () => {
@@ -241,14 +244,28 @@ describe("containers feature toggle", () => {
     );
   });
 
-  it("hides container setup and cleanup while the feature is off but keeps its switch searchable", () => {
+  it("hides container runtime, setup and cleanup while the feature is off but keeps its switch searchable", () => {
     expect(availableContainerIds(false)).toEqual(["containers-feature"]);
   });
 
-  it("keeps container setup and cleanup while the feature is on or unset", () => {
-    const items = ["container-setup", "container-runtimes", "containers-feature"];
+  it("keeps container runtime, setup and cleanup while the feature is on or unset", () => {
+    const items = [
+      "container-runtime-setting",
+      "container-setup",
+      "container-runtimes",
+      "containers-feature",
+    ];
     expect(availableContainerIds(true)).toEqual(items);
     expect(availableContainerIds(undefined)).toEqual(items);
+  });
+
+  it("finds the container runtime setting", () => {
+    expect(searchSettings("podman")[0]).toMatchObject({
+      id: "container-runtime-setting",
+      to: "/settings/containers",
+      targetId: "container-runtime",
+      scope: "project-defaults",
+    });
   });
 });
 

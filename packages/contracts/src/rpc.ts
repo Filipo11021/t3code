@@ -46,6 +46,7 @@ import {
   ContainerListInput,
   ContainerSettings,
   ContainerWorkspace,
+  ChangeContainerRuntimeInput,
   OpenContainerInput,
 } from "./containerWorkspace.ts";
 import * as Rpc from "effect/rpc/Rpc";
@@ -428,6 +429,7 @@ export const WS_METHODS = {
   containerGuestInspect: "containerGuest.inspect",
   containersAct: "containers.act",
   containersCleanup: "containers.cleanup",
+  containersChangeRuntime: "containers.changeRuntime",
   projectsListEntries: "projects.listEntries",
   projectsListIgnoredFiles: "projects.listIgnoredFiles",
   projectsReadFile: "projects.readFile",
@@ -2045,6 +2047,11 @@ export const WsRpcGroup = RpcGroup.make(
     error: ContainerError,
   }),
   Rpc.make(WS_METHODS.containersCleanup, { error: ContainerError }),
+  Rpc.make(WS_METHODS.containersChangeRuntime, {
+    payload: ChangeContainerRuntimeInput,
+    success: ContainerDestination,
+    error: ContainerError,
+  }),
   WsGuestShareCreateRpc,
   WsServerProbeRpc,
   WsServerGetConfigRpc,

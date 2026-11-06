@@ -2,11 +2,13 @@ import { use, useEffect, useState } from "react";
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import {
+  CONTAINER_RUNTIME_KINDS,
   ContainerCleanupRules,
   ContainerOperationId,
   DEFAULT_CONTAINER_CONFIG,
   CONTAINER_MAX_IDLE_MINUTES,
   CONTAINER_MAX_REMOVAL_DAYS,
+  type ContainerRuntimeKind,
   type ContainerSettings,
   type ContainerSetup,
   type EnvironmentId,
@@ -17,6 +19,7 @@ import * as Schema from "effect/Schema";
 import { runAtomCommand, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { serverEnvironment } from "../../state/server";
 import { ensureLocalApi } from "../../localApi";
+import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import {
   Select,
@@ -30,12 +33,22 @@ import {
   SettingsPageContainer,
   SettingsSection,
   SettingsRow,
+  SettingResetButton,
 } from "../../components/settings/settingsLayout";
+import {
+  useScopedSettings,
+  useUpdateScopedSettings,
+} from "../../components/settings/useScopedSettings";
 import { RetentionControl } from "../../components/settings/RetentionControl";
 import { newDraftId } from "../../lib/utils";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { ContainerEnvironmentSetup } from "./ContainerEnvironmentSetup";
-import { containerSettingsTargets } from "./selection";
+import {
+  containerRuntimeLabel,
+  containerRuntimeStatus,
+  containerSettingsTargets,
+} from "./selection";
+import { useContainerRuntimeOverview } from "./useContainerRuntimeOverview";
 
 const validCleanup = Schema.is(ContainerCleanupRules);
 const bounded = (value: number | null, maximum: number) =>
@@ -52,6 +65,163 @@ const toSetup = (config: ContainerSetup): ContainerSetup => ({
 });
 const message = (cause: unknown) =>
   cause instanceof Error ? cause.message : "Container operation failed.";
+
+function ContainerRuntimeSection() {
+  const { scope, connectedEnvironments } = useSettingsScope();
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  const environments = connectedEnvironments.filter(
+    (environment) =>
+      environment.serverConfig?.environment.capabilities.containerWorkspaces === true,
+  );
+  const projectIdsByEnvironment = new Map<EnvironmentId, Array<ProjectId>>();
+  for (const target of containerSettingsTargets(scope)) {
+    if (target.projectId === null) continue;
+    const ids = projectIdsByEnvironment.get(target.environmentId) ?? [];
+    ids.push(target.projectId);
+    projectIdsByEnvironment.set(target.environmentId, ids);
+  }
+  const targets = environments.map((environment) => {
+    const projectIds = projectIdsByEnvironment.get(environment.environmentId) ?? [];
+    return {
+      environmentId: environment.environmentId,
+      projectId: projectIds.length === 1 ? (projectIds[0] ?? null) : null,
+    };
+  });
+  const overview = useContainerRuntimeOverview({ targets });
+  const statusFor = (runtime: ContainerRuntimeKind) => {
+    const statuses = [...overview.entries.values()].flatMap((entry) => {
+      const status = entry.runtimes.find((candidate) => candidate.runtime === runtime);
+      return status ? [status] : [];
+    });
+    if (statuses.length === 0) return null;
+    if (statuses.every((status) => status.available)) return "Available";
+    return statuses.some((status) => status.available) ? "Available on some" : "Unavailable";
+  };
+  const unavailableLabels = environments.flatMap((environment) => {
+    const entry = overview.entries.get(environment.environmentId);
+    if (!entry) return [];
+    const status = entry.runtimes.find((candidate) => candidate.runtime === entry.runtime.resolved);
+    return status?.available === false ? [environment.label] : [];
+  });
+  return (
+    <SettingsSection id="container-runtime" title="Container runtime">
+      <p className="text-sm text-muted-foreground">
+        Docker and Podman are detected on the host. New containers use the selected runtime.
+        Existing containers keep their recorded runtime.
+      </p>
+      <SettingsRow
+        serverScoped
+        settingKeys={["containerRuntime"]}
+        title="Default container runtime"
+        description="Applies to new containers here. Projects can override it."
+        resetAction={
+          settings.containerRuntime !== "docker" ? (
+            <SettingResetButton
+              label="default container runtime"
+              onClick={() => updateSettings({ containerRuntime: "docker" })}
+            />
+          ) : null
+        }
+        control={
+          <Select
+            value={settings.containerRuntime}
+            onValueChange={(value) =>
+              updateSettings({ containerRuntime: value as ContainerRuntimeKind })
+            }
+          >
+            <SelectTrigger>
+              <SelectValue>{containerRuntimeLabel(settings.containerRuntime)}</SelectValue>
+            </SelectTrigger>
+            <SelectPopup>
+              {CONTAINER_RUNTIME_KINDS.map((runtime) => {
+                const status = statusFor(runtime);
+                return (
+                  <SelectItem key={runtime} value={runtime}>
+                    {containerRuntimeLabel(runtime)}
+                    {status ? ` · ${status}` : ""}
+                  </SelectItem>
+                );
+              })}
+            </SelectPopup>
+          </Select>
+        }
+      />
+      {unavailableLabels.length > 0 ? (
+        <p role="alert" className="text-sm text-destructive">
+          {unavailableLabels.join(", ")} {unavailableLabels.length === 1 ? "does" : "do"} not have
+          the selected runtime available. Start it or choose an available runtime. Existing
+          containers keep their recorded runtime.
+        </p>
+      ) : null}
+      <div className="space-y-4">
+        {environments.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Connect an environment to check Docker and Podman.
+          </p>
+        ) : null}
+        {environments.map((environment) => {
+          const entry = overview.entries.get(environment.environmentId);
+          const error = overview.errors.get(environment.environmentId);
+          return (
+            <div key={environment.environmentId} className="space-y-3 rounded-lg border p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="font-medium">{environment.label}</h3>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={overview.pending}
+                  onClick={overview.refresh}
+                >
+                  Check again
+                </Button>
+              </div>
+              {error ? (
+                <p role="alert" className="text-sm text-destructive">
+                  {error}
+                </p>
+              ) : null}
+              <div className="grid gap-2 sm:grid-cols-2">
+                {CONTAINER_RUNTIME_KINDS.map((runtime) => {
+                  const status = entry?.runtimes.find((candidate) => candidate.runtime === runtime);
+                  const count =
+                    entry?.workspaces.filter((workspace) => workspace.runtime === runtime).length ??
+                    0;
+                  return (
+                    <div key={runtime} className="space-y-1 rounded-md border p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium">
+                          {containerRuntimeLabel(runtime)}
+                        </span>
+                        {status ? (
+                          <Badge size="sm" variant={status.available ? "success" : "warning"}>
+                            {status.available ? "Available" : "Unavailable"}
+                          </Badge>
+                        ) : (
+                          <Badge size="sm" variant="outline">
+                            {overview.pending ? "Checking" : "Not checked"}
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {status?.available
+                          ? (status.version ?? "Version unavailable")
+                          : (status?.detail ?? "No status reported.")}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Used by {count} {count === 1 ? "container" : "containers"}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </SettingsSection>
+  );
+}
 
 function ContainerSettingsForTarget({
   environmentId,
@@ -72,11 +242,17 @@ function ContainerSettingsForTarget({
   const [data, setData] = useState<ContainerSettings | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const load = useStableCallback(async (signal?: AbortSignal) => {
+  const load = useStableCallback(async (signal?: AbortSignal, refreshRuntimes = false) => {
     const result = await runAtomCommand(
       registry,
       serverEnvironment.containers.settings,
-      { environmentId, input: projectId ? { projectId } : {} },
+      {
+        environmentId,
+        input: {
+          ...(projectId ? { projectId } : {}),
+          ...(refreshRuntimes ? { refreshRuntimes: true } : {}),
+        },
+      },
       { reportFailure: false },
     );
     if (signal?.aborted) return;
@@ -93,13 +269,13 @@ function ContainerSettingsForTarget({
     });
     return () => abort.abort();
   }, [load]);
-  const perform = async (work: () => Promise<void>) => {
+  const perform = async (work: () => Promise<void>, refreshRuntimes = false) => {
     if (pending) return;
     setPending(true);
     setError(null);
     try {
       await work();
-      await load();
+      await load(undefined, refreshRuntimes);
     } catch (cause) {
       setError(message(cause));
     }
@@ -189,7 +365,7 @@ function ContainerSettingsForTarget({
         size="sm"
         variant="outline"
         disabled={pending}
-        onClick={() => void perform(async () => {})}
+        onClick={() => void perform(async () => {}, true)}
       >
         Refresh this target
       </Button>
@@ -345,91 +521,172 @@ function ContainerSettingsForTarget({
                 project appear directly in that menu.
               </p>
             ) : null}
-            {data.workspaces.map((workspace) => (
-              <div key={workspace.id} className="space-y-2 rounded-md border p-3">
-                <p className="break-all text-sm">{workspace.checkoutPath}</p>
-                <p className="text-xs text-muted-foreground">
-                  {workspace.image} · {workspace.id.slice(0, 8)} · {workspace.status.type}
-                </p>
-                {workspace.status.type === "failed" ? (
-                  <p role="alert" className="text-sm text-destructive">
-                    {workspace.status.error}
+            {data.workspaces.map((workspace) => {
+              const currentRuntime = containerRuntimeLabel(workspace.runtime);
+              const runtimeUnavailable =
+                containerRuntimeStatus(data, workspace.runtime)?.available === false;
+              const otherRuntime = CONTAINER_RUNTIME_KINDS.find(
+                (runtime) => runtime !== workspace.runtime,
+              );
+              const otherRuntimeAvailable = data.runtimes.some(
+                (status) => status.runtime !== workspace.runtime && status.available,
+              );
+              return (
+                <div key={workspace.id} className="space-y-2 rounded-md border p-3">
+                  <p className="break-all text-sm">{workspace.checkoutPath}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {workspace.image} · {currentRuntime} ·{" "}
+                    {runtimeUnavailable ? "unavailable" : "available"} · {workspace.id.slice(0, 8)}{" "}
+                    · {workspace.status.type}
                   </p>
-                ) : null}
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={disabled}
-                    onClick={() =>
-                      void perform(async () => {
-                        const opened = await runAtomCommand(
-                          registry,
-                          serverEnvironment.containers.open,
-                          {
-                            environmentId,
-                            input: {
-                              operationId: ContainerOperationId.make(newDraftId()),
-                              projectId: workspace.projectId,
-                              checkoutPath: workspace.checkoutPath,
-                              selection: { type: "existing", workspaceId: workspace.id },
-                            },
-                          },
-                          { reportFailure: false },
-                        );
-                        if (opened._tag !== "Success") throw squashAtomCommandFailure(opened);
-                        const connected = await runAtomCommand(
-                          registry,
-                          serverEnvironment.containers.connect,
-                          opened.value,
-                          { reportFailure: false },
-                        );
-                        if (connected._tag !== "Success") throw squashAtomCommandFailure(connected);
-                        await navigate({
-                          to: "/settings/providers",
-                          search: { machine: opened.value.guestEnvironmentId },
-                        });
-                      })
+                  {runtimeUnavailable ? (
+                    <p role="alert" className="text-sm text-destructive">
+                      {currentRuntime} is unavailable. Change this container to an available runtime
+                      to continue.
+                    </p>
+                  ) : null}
+                  {workspace.status.type === "failed" ? (
+                    <p role="alert" className="text-sm text-destructive">
+                      {workspace.status.error}
+                    </p>
+                  ) : null}
+                  <SettingsRow
+                    title="Runtime"
+                    description="Changing runtime recreates the container. Guest home, checkout, installs and threads stay."
+                    control={
+                      <Select
+                        value={workspace.runtime}
+                        disabled={disabled || workspace.ownership !== "managed"}
+                        onValueChange={(value) => {
+                          const runtime = value as ContainerRuntimeKind;
+                          if (runtime === workspace.runtime) return;
+                          void (async () => {
+                            const label = containerRuntimeLabel(runtime);
+                            if (
+                              !(await ensureLocalApi().dialogs.confirm(
+                                `Switch this container to ${label}? The guest home, checkout, installs and threads stay, but the runtime restarts on ${label}.`,
+                              ))
+                            )
+                              return;
+                            await perform(async () => {
+                              const result = await runAtomCommand(
+                                registry,
+                                serverEnvironment.containers.changeRuntime,
+                                {
+                                  environmentId,
+                                  input: { workspaceId: workspace.id, runtime },
+                                },
+                                { reportFailure: false },
+                              );
+                              if (result._tag !== "Success") throw squashAtomCommandFailure(result);
+                            });
+                          })();
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue>{currentRuntime}</SelectValue>
+                        </SelectTrigger>
+                        <SelectPopup>
+                          <SelectItem value={workspace.runtime} disabled>
+                            {currentRuntime} · current
+                          </SelectItem>
+                          {data.runtimes
+                            .filter(
+                              (status) => status.runtime !== workspace.runtime && status.available,
+                            )
+                            .map((status) => (
+                              <SelectItem key={status.runtime} value={status.runtime}>
+                                {containerRuntimeLabel(status.runtime)}
+                              </SelectItem>
+                            ))}
+                        </SelectPopup>
+                      </Select>
                     }
-                  >
-                    Open guest setup
-                  </Button>
-                  {(["stop", "restart", "remove-runtime"] as const).map((action) => (
+                  />
+                  {!otherRuntimeAvailable && otherRuntime ? (
+                    <p className="text-xs text-muted-foreground">
+                      Start {currentRuntime} or install {containerRuntimeLabel(otherRuntime)} to
+                      change runtime.
+                    </p>
+                  ) : null}
+                  <div className="flex flex-wrap gap-2">
                     <Button
-                      key={action}
                       size="sm"
-                      variant={action === "remove-runtime" ? "destructive" : "outline"}
-                      disabled={disabled || workspace.ownership !== "managed"}
+                      variant="outline"
+                      disabled={disabled || runtimeUnavailable}
                       onClick={() =>
                         void perform(async () => {
-                          if (
-                            action === "remove-runtime" &&
-                            !(await ensureLocalApi().dialogs.confirm(
-                              "Remove this runtime? Guest home, history and checkout files are retained.",
-                              { variant: "destructive" },
-                            ))
-                          )
-                            return;
-                          const result = await runAtomCommand(
+                          const opened = await runAtomCommand(
                             registry,
-                            serverEnvironment.containers.act,
-                            { environmentId, input: { workspaceId: workspace.id, action } },
+                            serverEnvironment.containers.open,
+                            {
+                              environmentId,
+                              input: {
+                                operationId: ContainerOperationId.make(newDraftId()),
+                                projectId: workspace.projectId,
+                                checkoutPath: workspace.checkoutPath,
+                                selection: { type: "existing", workspaceId: workspace.id },
+                              },
+                            },
                             { reportFailure: false },
                           );
-                          if (result._tag !== "Success") throw squashAtomCommandFailure(result);
+                          if (opened._tag !== "Success") throw squashAtomCommandFailure(opened);
+                          const connected = await runAtomCommand(
+                            registry,
+                            serverEnvironment.containers.connect,
+                            opened.value,
+                            { reportFailure: false },
+                          );
+                          if (connected._tag !== "Success")
+                            throw squashAtomCommandFailure(connected);
+                          await navigate({
+                            to: "/settings/providers",
+                            search: { machine: opened.value.guestEnvironmentId },
+                          });
                         })
                       }
                     >
-                      {action === "remove-runtime"
-                        ? "Remove runtime"
-                        : action === "restart"
-                          ? "Restart"
-                          : "Stop"}
+                      Open guest setup
                     </Button>
-                  ))}
+                    {(["stop", "restart", "remove-runtime"] as const).map((action) => (
+                      <Button
+                        key={action}
+                        size="sm"
+                        variant={action === "remove-runtime" ? "destructive" : "outline"}
+                        disabled={
+                          disabled || runtimeUnavailable || workspace.ownership !== "managed"
+                        }
+                        onClick={() =>
+                          void perform(async () => {
+                            if (
+                              action === "remove-runtime" &&
+                              !(await ensureLocalApi().dialogs.confirm(
+                                "Remove this runtime? Guest home, history and checkout files are retained.",
+                                { variant: "destructive" },
+                              ))
+                            )
+                              return;
+                            const result = await runAtomCommand(
+                              registry,
+                              serverEnvironment.containers.act,
+                              { environmentId, input: { workspaceId: workspace.id, action } },
+                              { reportFailure: false },
+                            );
+                            if (result._tag !== "Success") throw squashAtomCommandFailure(result);
+                          })
+                        }
+                      >
+                        {action === "remove-runtime"
+                          ? "Remove runtime"
+                          : action === "restart"
+                            ? "Restart"
+                            : "Stop"}
+                      </Button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </>
       ) : (
@@ -446,6 +703,7 @@ export function ContainerSettingsPanel() {
   const targets = containerSettingsTargets(scope);
   return (
     <SettingsPageContainer>
+      <ContainerRuntimeSection />
       <SettingsSection id="container-setup" title="Container environments">
         <p className="text-sm text-muted-foreground">
           Setup belongs to each environment-local project. Checkout scope edits its owning project.

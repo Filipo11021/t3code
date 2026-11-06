@@ -36,6 +36,10 @@ export function useContainerWorkspacePicker(input: {
   const registry = use(RegistryContext);
   const floating = useComposerMenuProps();
   const config = useAtomValue(serverEnvironment.configValueAtom(input.environmentId));
+  const serverSettings = useAtomValue(serverEnvironment.settingsValueAtom(input.environmentId));
+  const runtimeSettingsKey = `${serverSettings?.containerRuntime ?? "docker"}:${
+    serverSettings?.projectSettingsOverrides[input.projectId]?.containerRuntime ?? ""
+  }`;
   const containersEnabled = useClientSettings((settings) => settings.containersEnabled);
   const permission = useAtomValue(
     serverEnvironment.containers.open.permissionAtom(input.environmentId),
@@ -47,7 +51,9 @@ export function useContainerWorkspacePicker(input: {
     null,
   );
   const settings =
-    loaded?.key === `${input.environmentId}:${input.projectId}` ? loaded.value : null;
+    loaded?.key === `${input.environmentId}:${input.projectId}:${runtimeSettingsKey}`
+      ? loaded.value
+      : null;
   const supported =
     containersEnabled &&
     config?.environment.capabilities.containerWorkspaces === true &&
@@ -60,7 +66,12 @@ export function useContainerWorkspacePicker(input: {
     permission &&
     config?.environment.capabilities.containerProjects === true;
   const load = useStableCallback(
-    async (environmentId: EnvironmentId, projectId: ProjectId, signal: AbortSignal) => {
+    async (
+      environmentId: EnvironmentId,
+      projectId: ProjectId,
+      runtimeKey: string,
+      signal: AbortSignal,
+    ) => {
       if (signal.aborted) return;
       const result = await runAtomCommand(
         registry,
@@ -70,7 +81,7 @@ export function useContainerWorkspacePicker(input: {
       );
       if (!signal.aborted)
         setLoaded({
-          key: `${environmentId}:${projectId}`,
+          key: `${environmentId}:${projectId}:${runtimeKey}`,
           value: result._tag === "Success" ? result.value : null,
         });
     },
@@ -79,9 +90,9 @@ export function useContainerWorkspacePicker(input: {
   useEffect(() => {
     if (!supported || !permission) return;
     const abort = new AbortController();
-    void load(input.environmentId, input.projectId, abort.signal);
+    void load(input.environmentId, input.projectId, runtimeSettingsKey, abort.signal);
     return () => abort.abort();
-  }, [load, input.environmentId, input.projectId, supported, permission]);
+  }, [load, input.environmentId, input.projectId, supported, permission, runtimeSettingsKey]);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Turning containers off drops a chosen workspace, while pending Sends stay recoverable.
   useEffect(() => {
     if (containersEnabled || !input.draftId || state?.kind !== "selected") return;

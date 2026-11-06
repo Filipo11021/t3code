@@ -14,6 +14,7 @@ import {
   DEFAULT_SERVER_SETTINGS,
   globalIdleCompaction,
   idleCompactionPatch,
+  PROJECT_SCOPED_SERVER_SETTING_KEYS,
   requiredScopesForProjectMutation,
   resolveIdleCompaction,
   resolveProjectProviderInstanceEnabled,
@@ -512,5 +513,20 @@ describe("server model preferences", () => {
     const input = { favorites: [], providerModelPreferences: {} };
     expect(encodeServerSettings(decodeServerSettings(input))).toMatchObject(input);
     expect(decodeServerSettingsPatch(input)).toEqual(input);
+  });
+});
+
+describe("container runtime", () => {
+  it("defaults to Docker and carries environment and project overrides", () => {
+    expect(decodeServerSettings({}).containerRuntime).toBe("docker");
+    expect(decodeServerSettingsPatch({ containerRuntime: "podman" }).containerRuntime).toBe(
+      "podman",
+    );
+    const projectId = ProjectId.make("project-container-runtime");
+    const settings = decodeServerSettings({
+      projectSettingsOverrides: { [projectId]: { containerRuntime: "podman" } },
+    });
+    expect(settings.projectSettingsOverrides[projectId]?.containerRuntime).toBe("podman");
+    expect(PROJECT_SCOPED_SERVER_SETTING_KEYS).toContain("containerRuntime");
   });
 });

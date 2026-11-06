@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { EnvironmentId, ProjectId, ThreadId, RunId } from "./baseSchemas.ts";
 import { ModelSelection } from "./modelSelection.ts";
@@ -11,6 +12,23 @@ export const CONTAINER_GUEST_SCOPES = AuthStandardClientScopes.filter(
     ),
 );
 export const CONTAINER_HOST_SCOPES = [AuthEnvironmentMaintainScope, ...CONTAINER_GUEST_SCOPES];
+
+export const ContainerRuntimeKind = Schema.Literals(["docker", "podman"]);
+export type ContainerRuntimeKind = typeof ContainerRuntimeKind.Type;
+export const CONTAINER_RUNTIME_KINDS = ["docker", "podman"] as const;
+export const CONTAINER_RUNTIME_LABELS: Record<ContainerRuntimeKind, string> = {
+  docker: "Docker",
+  podman: "Podman",
+};
+
+export const ContainerRuntimeStatus = Schema.Struct({
+  runtime: ContainerRuntimeKind,
+  available: Schema.Boolean,
+  version: Schema.NullOr(Schema.String),
+  detail: Schema.NullOr(Schema.String),
+  checkedAt: Schema.Number,
+});
+export type ContainerRuntimeStatus = typeof ContainerRuntimeStatus.Type;
 
 export const ContainerWorkspaceId = Schema.String.pipe(
   Schema.check(Schema.isPattern(/^[a-zA-Z0-9-]{1,80}$/)),
@@ -113,6 +131,7 @@ export const ContainerDestination = Schema.Struct({
   guestEnvironmentId: EnvironmentId,
   guestProjectId: ProjectId,
   guestCheckoutPath: Schema.String,
+  runtime: ContainerRuntimeKind,
   label: Schema.String,
 });
 export type ContainerDestination = typeof ContainerDestination.Type;
@@ -130,6 +149,7 @@ export const ContainerWorkspace = Schema.Struct({
   projectId: ProjectId,
   checkoutPath: Schema.String,
   image: Schema.String,
+  runtime: ContainerRuntimeKind.pipe(Schema.withDecodingDefault(Effect.succeed("docker"))),
   status: ContainerStatus,
   lastUsedAt: Schema.Number,
 });
@@ -142,9 +162,21 @@ export type ContainerActionInput = typeof ContainerActionInput.Type;
 export const ContainerListInput = Schema.Struct({
   projectId: Schema.optionalKey(ProjectId),
   checkoutPath: Schema.optionalKey(Schema.String),
+  refreshRuntimes: Schema.optionalKey(Schema.Boolean),
 });
+export const ChangeContainerRuntimeInput = Schema.Struct({
+  workspaceId: ContainerWorkspaceId,
+  runtime: ContainerRuntimeKind,
+});
+export type ChangeContainerRuntimeInput = typeof ChangeContainerRuntimeInput.Type;
 export const ContainerSettings = Schema.Struct({
   config: ContainerConfig,
+  runtime: Schema.Struct({
+    default: ContainerRuntimeKind,
+    project: Schema.NullOr(ContainerRuntimeKind),
+    resolved: ContainerRuntimeKind,
+  }),
+  runtimes: Schema.Array(ContainerRuntimeStatus),
   workspaces: Schema.Array(ContainerWorkspace),
   available: Schema.Boolean,
   project: Schema.optionalKey(
@@ -191,6 +223,7 @@ export class ContainerError extends Schema.TaggedError<ContainerError>()("Contai
   stage: Schema.String,
   reason: Schema.Literals([
     "unavailable",
+    "runtime-unavailable",
     "runtime-required",
     "engine-failed",
     "invalid-checkout",
@@ -212,7 +245,9 @@ export class ContainerError extends Schema.TaggedError<ContainerError>()("Contai
       case "runtime-required":
         return "A matching Linux T3 runtime is required. Set T3CODE_CONTAINER_RUNTIME to a complete runtime directory or archive built from this revision.";
       case "unavailable":
-        return "Container engine unavailable. Install Docker or configure T3CODE_CONTAINER_ENGINE.";
+        return "Container engine unavailable. Install Docker or choose an available runtime in Settings > Containers.";
+      case "runtime-unavailable":
+        return "The selected container runtime is unavailable. Start it or choose another runtime in Settings > Containers.";
       case "engine-failed":
         return `Container ${this.stage} failed. Check the container logs before retrying. Install retries may repeat partially completed work.`;
       case "invalid-checkout":

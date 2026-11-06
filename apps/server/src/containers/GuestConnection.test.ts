@@ -38,6 +38,8 @@ it.effect("waits for long setup hooks after session issuance and bounds total re
       directory: "/state",
       mounts: [],
       containerId: "container",
+      runtime: "docker",
+      staleContainers: [],
       guest: null,
     };
     let ready = false;
@@ -51,20 +53,27 @@ it.effect("waits for long setup hooks after session issuance and bounds total re
                 legacyCookieName: undefined,
               }),
               Layer.mock(Engine.ContainerEngine)({
-                inspect: () =>
-                  Effect.succeed({
-                    Id: "container",
-                    Config: {
-                      Labels: { "codes.t3.workspace": workspaceId, "codes.t3.owner": hostId },
-                    },
-                    State: { Running: true },
-                    Mounts: [],
-                    NetworkSettings: {
-                      Ports: { "3773/tcp": [{ HostIp: "127.0.0.1", HostPort: "12345" }] },
-                    },
+                inspect: (runtime, name) =>
+                  Effect.sync(() => {
+                    expect(runtime).toBe("docker");
+                    expect(name).toBe(GuestConnection.containerName(workspaceId));
+                    return {
+                      Id: "container",
+                      Config: {
+                        Labels: { "codes.t3.workspace": workspaceId, "codes.t3.owner": hostId },
+                      },
+                      State: { Running: true },
+                      Mounts: [],
+                      NetworkSettings: {
+                        Ports: { "3773/tcp": [{ HostIp: "127.0.0.1", HostPort: "12345" }] },
+                      },
+                    };
                   }),
-                run: () =>
-                  Effect.succeed(JSON.stringify({ sessionId: "session", token: "test-only" })),
+                run: (runtime) =>
+                  Effect.sync(() => {
+                    expect(runtime).toBe("docker");
+                    return JSON.stringify({ sessionId: "session", token: "test-only" });
+                  }),
               }),
               Layer.succeed(
                 HttpClient.HttpClient,

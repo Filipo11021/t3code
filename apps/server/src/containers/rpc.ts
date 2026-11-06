@@ -15,5 +15,6 @@ export const handlers = Effect.gen(function* () {
     [WS_METHODS.containersConfigureProject]: service.configureProject,
     [WS_METHODS.containersAct]: service.act,
     [WS_METHODS.containersCleanup]: () => service.cleanup,
+    [WS_METHODS.containersChangeRuntime]: service.changeRuntime,
   };
 });

@@ -60,7 +60,7 @@ const make = Effect.gen(function* () {
   const watched = new Set<string>();
   const serviceScope = yield* Scope.Scope;
   const origin = Effect.fn("GuestConnection.origin")(function* (record: WorkspaceRecord) {
-    const inspected = yield* engine.inspect(containerName(record.id));
+    const inspected = yield* engine.inspect(record.runtime, containerName(record.id));
     const labels = inspected?.Config.Labels;
     if (
       !inspected ||
@@ -100,7 +100,7 @@ const make = Effect.gen(function* () {
         )
           return cached.token;
         for (const [id, entry] of credentials) if (entry.expiresAt <= now) credentials.delete(id);
-        const json = yield* engine.run("guest-session", [
+        const json = yield* engine.run(record.runtime, "guest-session", [
           "exec",
           "--user",
           "t3",
@@ -143,7 +143,7 @@ const make = Effect.gen(function* () {
                   credentials.delete(key);
                   watched.delete(key);
                   if (!current) return;
-                  yield* engine.run("guest-session-revoke", [
+                  yield* engine.run(record.runtime, "guest-session-revoke", [
                     "exec",
                     "--user",
                     "t3",

@@ -12,6 +12,7 @@ import {
   CommandId,
   ThreadId,
   MessageId,
+  ContainerRuntimeKind,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -37,6 +38,12 @@ export const WorkspaceRecord = Schema.Struct({
     }),
   ),
   containerId: Schema.NullOr(Schema.String),
+  staleContainers: Schema.Array(
+    Schema.Struct({
+      runtime: ContainerRuntimeKind,
+      containerId: Schema.String,
+    }),
+  ).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   guest: Schema.NullOr(Schema.Struct({ environmentId: EnvironmentId, projectId: ProjectId })),
 });
 export type WorkspaceRecord = typeof WorkspaceRecord.Type;

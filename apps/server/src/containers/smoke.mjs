@@ -81,7 +81,7 @@ const run = Effect.gen(function* () {
     selection: { type: "existing", workspaceId: destination.workspaceId },
   });
   NodeAssert.equal(reused.guestEnvironmentId, destination.guestEnvironmentId);
-  const engine = process.env.T3CODE_CONTAINER_ENGINE || "docker";
+  const engine = destination.runtime;
   const inspected = NodeChildProcess.spawnSync(
     engine,
     ["container", "inspect", `t3-workspace-${destination.workspaceId}`],

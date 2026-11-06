@@ -233,6 +233,14 @@ const SOURCE_CONTROL_HOST_TERMS = sourceControlClients.definitions
 
 export const SETTINGS_SEARCH_ITEMS = [
   {
+    id: "container-runtime-setting",
+    title: "Container runtime",
+    to: "/settings/containers",
+    targetId: "container-runtime",
+    scope: "project-defaults",
+    searchTerms: ["docker podman runtime engine provider default available"],
+  },
+  {
     id: "container-setup",
     title: "Container install, start, and environment",
     to: "/settings/containers",
