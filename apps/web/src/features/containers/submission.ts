@@ -280,11 +280,7 @@ export function createContainerSubmission(deps: {
           throw new Error(
             "The guest rejected the original Send. Choose a corrected Send explicitly; its source is unchanged.",
           );
-        if (
-          state.kind === "pending" &&
-          state.progress.kind === "setup" &&
-          state.error === null
-        )
+        if (state.kind === "pending" && state.progress.kind === "setup" && state.error === null)
           return;
         if (containerRequestIssued(state) && state.kind === "pending") {
           if (state.progress.kind === "accepted") await finish(token, state);

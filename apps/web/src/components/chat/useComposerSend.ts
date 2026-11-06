@@ -422,8 +422,9 @@ export function useComposerSend(input: ComposerSendInput) {
           appAtomRegistry
             .get(environmentServerConfigsAtom)
             .get(environmentId)
-            ?.providers.find((provider) => provider.instanceId === live?.selectedModelSelection.instanceId)
-            ?.driver ?? null,
+            ?.providers.find(
+              (provider) => provider.instanceId === live?.selectedModelSelection.instanceId,
+            )?.driver ?? null,
       };
     },
     clear: () => {
