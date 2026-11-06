@@ -44,6 +44,12 @@ const writableRules = (rules: ContainerCleanupRules): ContainerCleanupRules => (
   idleStopMinutes: bounded(rules.idleStopMinutes, CONTAINER_MAX_IDLE_MINUTES),
   removeAfterDays: bounded(rules.removeAfterDays, CONTAINER_MAX_REMOVAL_DAYS),
 });
+const toSetup = (config: ContainerSetup): ContainerSetup => ({
+  image: config.image,
+  installScript: config.installScript,
+  startScript: config.startScript,
+  environment: config.environment,
+});
 const message = (cause: unknown) =>
   cause instanceof Error ? cause.message : "Container operation failed.";
 
@@ -189,7 +195,7 @@ function ContainerSettingsForTarget({
           <ContainerEnvironmentSetup
             key={JSON.stringify(data.project?.setup ?? data.config)}
             title={projectId ? "Project environment" : "Defaults for unconfirmed projects"}
-            initial={data.project?.setup?.value ?? data.config}
+            initial={data.project?.setup?.value ?? toSetup(data.config)}
             disabled={disabled}
             onSave={async (value) => {
               setPending(true);
@@ -208,7 +214,9 @@ function ContainerSettingsForTarget({
             variant="outline"
             disabled={disabled}
             onClick={() =>
-              void perform(() => saveSetup(projectId ? data.config : DEFAULT_CONTAINER_CONFIG))
+              void perform(() =>
+                saveSetup(toSetup(projectId ? data.config : DEFAULT_CONTAINER_CONFIG)),
+              )
             }
           >
             Reset setup to {projectId ? "host defaults" : "Ubuntu defaults"}
