@@ -116,6 +116,21 @@ export function createContainerSubmission(deps: {
     fence(token, pending.intent);
     deps.write(pending);
   };
+  const resolveSetup = async (token: number, pending: PendingContainerDraft) => {
+    const settings = await deps.settings(pending.intent);
+    fence(token, pending.intent);
+    if (!settings.project)
+      throw new Error("Update the host server to support project container setup.");
+    if (!settings.project.setup) {
+      write(token, {
+        ...pending,
+        error: null,
+        progress: { kind: "setup", seed: settings.config, revision: null },
+      });
+      return null;
+    }
+    return settings.project.setup.revision;
+  };
   const finish = async (token: number, pending: PendingContainerDraft) => {
     if (pending.progress.kind !== "accepted" || pending.progress.status.kind !== "accepted") return;
     if (pending.captured.submissionIntent === "foreground") {
@@ -321,18 +336,8 @@ export function createContainerSubmission(deps: {
           await prepare(token, pending, null);
           return;
         }
-        const settings = await deps.settings(state.intent);
-        fence(token, state.intent);
-        if (!settings.project)
-          throw new Error("Update the host server to support project container setup.");
-        if (!settings.project.setup) {
-          write(token, {
-            ...pending,
-            progress: { kind: "setup", seed: settings.config, revision: null },
-          });
-          return;
-        }
-        await prepare(token, pending, settings.project.setup.revision);
+        const revision = await resolveSetup(token, pending);
+        if (revision) await prepare(token, pending, revision);
       });
       return true;
     },
@@ -381,6 +386,13 @@ export function createContainerSubmission(deps: {
           )
             await issue(token, state, true);
           else await finish(token, state);
+        } else if (
+          state.progress.kind === "opening" &&
+          state.intent.choice.type === "fresh" &&
+          state.progress.revision === null
+        ) {
+          const revision = await resolveSetup(token, state);
+          if (revision) await prepare(token, state, revision);
         } else if (state.progress.kind !== "setup" && state.progress.kind !== "rejected")
           await prepare(
             token,

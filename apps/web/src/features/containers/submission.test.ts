@@ -94,6 +94,7 @@ function fixture(confirmed = true) {
   let navigationFailure = false;
   let responseLost = false;
   let saved = confirmed;
+  let settingsFailure = false;
   let inspected: ContainerSubmissionStatus = { kind: "reserved" };
   const accepted: ContainerSubmissionStatus = {
     kind: "accepted",
@@ -115,16 +116,19 @@ function fixture(confirmed = true) {
       persisted.push(structuredClone(next));
       state = next;
     },
-    settings: async () => ({
-      config: DEFAULT_CONTAINER_CONFIG,
-      available: true,
-      workspaces: [],
-      project: {
-        projectId: source.projectId,
-        setup: saved ? { revision, value: DEFAULT_CONTAINER_CONFIG } : null,
-        cleanup: null,
-      },
-    }),
+    settings: async () => {
+      if (settingsFailure) throw new Error("settings failed");
+      return {
+        config: DEFAULT_CONTAINER_CONFIG,
+        available: true,
+        workspaces: [],
+        project: {
+          projectId: source.projectId,
+          setup: saved ? { revision, value: DEFAULT_CONTAINER_CONFIG } : null,
+          cleanup: null,
+        },
+      };
+    },
     save: async (input) => {
       if (input.expectedRevision !== (saved ? revision : null)) throw new Error("setup conflict");
       saved = true;
@@ -215,6 +219,9 @@ function fixture(confirmed = true) {
     },
     confirmed: (value: boolean) => {
       saved = value;
+    },
+    settingsFailure: (value: boolean) => {
+      settingsFailure = value;
     },
     clearCount: () => clearCount,
     navigations: () => navigations,
@@ -402,6 +409,24 @@ it("keeps an open setup editor when Send is pressed again", async () => {
   await f.send();
   expect(f.state()).toBe(setup);
   expect(f.opened).toEqual([]);
+});
+
+it("re-reads confirmed setup when a settings failure left an opening state without a revision", async () => {
+  const f = fixture();
+  f.settingsFailure(true);
+  await f.send();
+  const opening = f.state();
+  expect(opening?.kind === "pending" && opening.progress.kind).toBe("opening");
+  expect(
+    opening?.kind === "pending" && opening.progress.kind === "opening"
+      ? opening.progress.revision
+      : "missing",
+  ).toBeNull();
+  expect(f.opened).toEqual([]);
+  f.settingsFailure(false);
+  await f.controller.continueOriginal();
+  expect(f.opened).toEqual([{ operationId: f.intent.operationId, revision }]);
+  expect(f.submitted).toHaveLength(1);
 });
 
 it("reloads uncertain requests as inspect-only and explicitly retries the frozen payload without remapping or formatting", async () => {
