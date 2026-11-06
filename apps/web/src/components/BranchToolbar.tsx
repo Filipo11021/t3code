@@ -6,7 +6,14 @@ import { ComposerContextLabel } from "./ComposerContextLabel";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId, ModelSelection, ProjectId, ThreadId } from "@t3tools/contracts";
 import { useContainerWorkspacePicker } from "../features/containers/useContainerWorkspacePicker";
-import { FolderGit2Icon, FolderGitIcon, FolderIcon, PlusIcon, ScaleIcon } from "lucide-react";
+import {
+  BoxIcon,
+  FolderGit2Icon,
+  FolderGitIcon,
+  FolderIcon,
+  PlusIcon,
+  ScaleIcon,
+} from "lucide-react";
 import {
   type Ref,
   type MouseEvent as ReactMouseEvent,
@@ -199,8 +206,9 @@ const RunContextSelector = memo(function RunContextSelector({
   const composerFloatingLayerProps = useComposerMenuProps();
   const activeEnvironment =
     availableEnvironments?.find((env) => env.environmentId === environmentId) ?? null;
-  const WorkspaceIcon =
-    effectiveEnvMode === "worktree"
+  const WorkspaceIcon = containerValue
+    ? BoxIcon
+    : effectiveEnvMode === "worktree"
       ? FolderGit2Icon
       : activeWorktreePath
         ? FolderGitIcon

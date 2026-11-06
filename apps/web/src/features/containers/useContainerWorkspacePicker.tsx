@@ -1,3 +1,4 @@
+import { BoxIcon } from "lucide-react";
 import { use, useEffect, useState } from "react";
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import {
@@ -108,7 +109,10 @@ export function useContainerWorkspacePicker(input: {
   };
   const menuItems = options.map((option) => (
     <MenuRadioItem key={option.value} value={option.value} disabled={!allowed} closeOnClick>
-      {option.label}
+      <span className="inline-flex min-w-0 items-center gap-1.5">
+        <BoxIcon className="size-3" />
+        <span className="min-w-0 truncate">{option.label}</span>
+      </span>
     </MenuRadioItem>
   ));
   const standalone = supported ? (

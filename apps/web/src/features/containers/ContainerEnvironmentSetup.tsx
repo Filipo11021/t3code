@@ -29,7 +29,7 @@ export function ContainerEnvironmentSetup({
   const [environment, setEnvironment] = useState(JSON.stringify(initial.environment, null, 2));
   const [error, setError] = useState<string | null>(null);
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <h3 className="font-medium">{title}</h3>
       <p className="text-sm text-muted-foreground">
         Source files are shared with the host. New containers use this project's saved environment.
@@ -48,42 +48,42 @@ export function ContainerEnvironmentSetup({
         Install script
         <Textarea
           aria-label="Container install script"
-          rows={5}
+          rows={3}
           value={installScript}
           onChange={(event) => setInstallScript(event.target.value)}
           disabled={disabled}
         />
         <span className="text-xs text-muted-foreground">
-          Runs as the guest user until successful. Recreating a removed runtime installs again.
-          Failed retries may repeat partial work.
+          Runs once after success. Recreating a removed runtime installs again; retries may repeat
+          partial work.
         </span>
       </label>
       <label className="grid gap-2 text-sm">
         Start script
         <Textarea
           aria-label="Container start script"
-          rows={4}
+          rows={3}
           value={startScript}
           onChange={(event) => setStartScript(event.target.value)}
           disabled={disabled}
         />
         <span className="text-xs text-muted-foreground">
-          Runs on each runtime start and must finish before T3 is ready. Use a guest terminal for
-          long-running commands.
+          Must finish before T3 is ready on each start. Use a guest terminal for long-running
+          commands.
         </span>
       </label>
       <label className="grid gap-2 text-sm">
         Plain environment values as JSON
         <Textarea
           aria-label="Container environment variables"
-          rows={4}
+          rows={2}
           value={environment}
           onChange={(event) => setEnvironment(event.target.value)}
           disabled={disabled}
         />
         <span className="text-xs text-muted-foreground">
-          Non-secret values only. Host credentials are not copied. HOME, PATH and runtime settings
-          cannot be overridden.
+          Non-secret values only. Host credentials are not copied, and core guest settings cannot be
+          overridden.
         </span>
       </label>
       {error ? (

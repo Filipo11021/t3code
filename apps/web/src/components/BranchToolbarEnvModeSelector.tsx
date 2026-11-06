@@ -1,6 +1,6 @@
 import { ComposerSelectControl } from "./chat/ComposerControl";
 import { ComposerContextLabel } from "./ComposerContextLabel";
-import { FolderGit2Icon, FolderGitIcon, FolderIcon } from "lucide-react";
+import { BoxIcon, FolderGit2Icon, FolderGitIcon, FolderIcon } from "lucide-react";
 import { memo, type MouseEvent as ReactMouseEvent } from "react";
 
 import {
@@ -148,7 +148,9 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
             />
           }
         >
-          {effectiveEnvMode === "worktree" ? (
+          {containerValue ? (
+            <BoxIcon className="size-3" />
+          ) : effectiveEnvMode === "worktree" ? (
             <FolderGit2Icon className="size-3" />
           ) : activeWorktreePath ? (
             <FolderGitIcon className="size-3" />
@@ -174,11 +176,6 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
       >
         <SelectGroup>
           <SelectGroupLabel>Workspace</SelectGroupLabel>
-          {containerOptions.map((option) => (
-            <SelectItem key={option.value} value={option.value} disabled={!containersAllowed}>
-              {option.label}
-            </SelectItem>
-          ))}
           <SelectItem value="local">
             <span className="inline-flex items-center gap-1.5">
               {activeWorktreePath ? (
@@ -200,6 +197,14 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
               <PreviousWorktreeItemContent branch={previousWorktreeBranch} />
             </SelectItem>
           ) : null}
+          {containerOptions.map((option) => (
+            <SelectItem key={option.value} value={option.value} disabled={!containersAllowed}>
+              <span className="inline-flex min-w-0 items-center gap-1.5">
+                <BoxIcon className="size-3" />
+                <span className="min-w-0 truncate">{option.label}</span>
+              </span>
+            </SelectItem>
+          ))}
         </SelectGroup>
       </SelectPopup>
     </Select>

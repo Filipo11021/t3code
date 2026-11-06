@@ -55,10 +55,12 @@ const message = (cause: unknown) =>
 
 function ContainerSettingsForTarget({
   environmentId,
+  environmentLabel,
   projectId,
   label,
 }: {
   environmentId: EnvironmentId;
+  environmentLabel: string;
   projectId: ProjectId | null;
   label: string;
 }) {
@@ -171,12 +173,13 @@ function ContainerSettingsForTarget({
   const disabled = pending || !allowed || !data?.available;
   return (
     <div className="space-y-6 rounded-lg border p-4">
-      <h3 className="font-medium">
-        {label} · {environmentId}
-      </h3>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="font-medium">{label}</h3>
+        <span className="text-xs text-muted-foreground">{environmentLabel}</span>
+      </div>
       {error ? (
         <p role="alert" className="text-sm text-destructive">
-          {error} This target was not confirmed saved. Other targets are independent.
+          {error} Other targets are unaffected.
         </p>
       ) : null}
       {!allowed ? (
@@ -243,7 +246,13 @@ function ContainerSettingsForTarget({
                     }}
                   >
                     <SelectTrigger>
-                      <SelectValue />
+                      <SelectValue>
+                        {policy.kind === "inherit"
+                          ? "Inherit"
+                          : policy.kind === "off"
+                            ? "Off"
+                            : "Custom"}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectPopup>
                       <SelectItem value="inherit">Inherit</SelectItem>
@@ -328,7 +337,7 @@ function ContainerSettingsForTarget({
                 })
               }
             >
-              Run host idle cleanup
+              Run idle cleanup now
             </Button>
             {data.workspaces.length === 0 ? (
               <p className="text-sm text-muted-foreground">
@@ -454,11 +463,15 @@ export function ContainerSettingsPanel() {
           const key = `${target.environmentId}:${target.projectId ?? "host"}`;
           return environment?.connection.phase === "connected" &&
             environment.serverConfig?.environment.capabilities.containerProjects === true ? (
-            <ContainerSettingsForTarget key={key} {...target} />
+            <ContainerSettingsForTarget
+              key={key}
+              {...target}
+              environmentLabel={environment.label}
+            />
           ) : (
             <p key={key} role="status" className="text-sm text-muted-foreground">
-              {target.label} · {target.environmentId} is offline, unsupported, or needs a host
-              update. No settings were saved there.
+              {target.label} · {environment?.label ?? target.environmentId} is offline, unsupported,
+              or needs a host update. No settings were saved there.
             </p>
           );
         })}

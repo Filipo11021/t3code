@@ -16,6 +16,7 @@ import { formatOutgoingPrompt } from "../../components/ChatView.logic";
 import { Button } from "../../components/ui/button";
 import {
   Dialog,
+  DialogPanel,
   DialogPopup,
   DialogHeader,
   DialogTitle,
@@ -23,6 +24,7 @@ import {
 } from "../../components/ui/dialog";
 import { ContainerEnvironmentSetup } from "./ContainerEnvironmentSetup";
 import { createContainerSubmission, type ContainerLiveSource } from "./submission";
+import { checkoutLabel } from "./selection";
 import { ContainerOperationId } from "@t3tools/contracts";
 import { newDraftId } from "../../lib/utils";
 import type { ChatComposerHandle } from "../../components/chat/ChatComposer";
@@ -38,7 +40,7 @@ type ContainerSourceSnapshot = {
   firstSendAllowed: boolean;
   providerDriver: import("@t3tools/contracts").ProviderDriverKind | null;
 };
-export function readContainerSource(
+function readContainerSource(
   draftId: DraftId,
   snapshot: ContainerSourceSnapshot,
 ): ContainerLiveSource {
@@ -299,22 +301,22 @@ export function useContainerSubmission(input: {
           setVisible(open);
         }}
       >
-        <DialogPopup>
+        <DialogPopup className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>
               {pending.progress.kind === "setup" ? "Project environment" : "Container Send"}
             </DialogTitle>
             <DialogDescription>
-              Your prompt stays in the source until the guest accepts it. Reload and reconnect never
-              submit automatically.
+              Your prompt stays in the source until the guest accepts it. Reload never sends
+              automatically.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <DialogPanel>
             {pending.progress.kind === "setup" ? (
               <>
                 <ContainerEnvironmentSetup
                   key={pending.progress.revision ?? "unconfirmed"}
-                  title={pending.intent.source.checkoutPath}
+                  title={checkoutLabel(pending.intent.source.checkoutPath)}
                   initial={pending.progress.seed}
                   disabled={false}
                   onSave={async (value) => {
@@ -337,27 +339,43 @@ export function useContainerSubmission(input: {
                   {pending.progress.kind === "rejected"
                     ? "The guest rejected the original Send. You can explicitly start a corrected Send in the same runtime."
                     : pending.progress.kind === "accepted"
-                      ? "The guest accepted the original prompt."
+                      ? pending.progress.status.preparation === "blocked"
+                        ? "The guest accepted the original prompt, but run preparation is blocked. Fix the guest provider, then continue."
+                        : pending.progress.status.preparation === "preparing"
+                          ? "The guest accepted the original prompt. Finishing run preparation."
+                          : "The guest accepted the original prompt."
                       : pending.progress.kind === "request-issued"
                         ? "The original Send may already be accepted. Inspect or explicitly continue it."
-                        : "Preparing the guest. Your source is unchanged."}
+                        : pending.progress.kind === "provider-required"
+                          ? "Set up the selected provider in the guest, then continue. Your source is unchanged."
+                          : "Preparing the guest. Your source is unchanged."}
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      if (draftId) void getController(draftId).inspect();
-                    }}
-                  >
-                    Inspect original Send
-                  </Button>
-                  <Button
-                    onClick={() => {
-                      if (draftId) void getController(draftId).continueOriginal();
-                    }}
-                  >
-                    Continue original Send
-                  </Button>
+                  {pending.progress.kind === "request-issued" ? (
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        if (draftId) void getController(draftId).inspect();
+                      }}
+                    >
+                      Inspect original Send
+                    </Button>
+                  ) : null}
+                  {pending.progress.kind === "opening" ||
+                  pending.progress.kind === "provider-required" ||
+                  pending.progress.kind === "request-issued" ||
+                  (pending.progress.kind === "accepted" &&
+                    pending.progress.status.preparation !== "released") ? (
+                    <Button
+                      onClick={() => {
+                        if (draftId) void getController(draftId).continueOriginal();
+                      }}
+                    >
+                      {pending.progress.kind === "opening"
+                        ? "Retry container setup"
+                        : "Continue original Send"}
+                    </Button>
+                  ) : null}
                   {pending.progress.kind === "rejected" ? (
                     <Button
                       onClick={() => {
@@ -411,7 +429,7 @@ export function useContainerSubmission(input: {
             >
               Stop waiting
             </Button>
-          </div>
+          </DialogPanel>
         </DialogPopup>
       </Dialog>
     </>
