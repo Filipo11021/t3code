@@ -12,7 +12,7 @@ import {
   CommandId,
   ThreadId,
   MessageId,
-  ContainerRuntimeKind,
+  ContainerProviderKind,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -40,14 +40,52 @@ export const WorkspaceRecord = Schema.Struct({
   containerId: Schema.NullOr(Schema.String),
   staleContainers: Schema.Array(
     Schema.Struct({
-      runtime: ContainerRuntimeKind,
+      provider: ContainerProviderKind,
       containerId: Schema.String,
     }),
   ).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   guest: Schema.NullOr(Schema.Struct({ environmentId: EnvironmentId, projectId: ProjectId })),
 });
 export type WorkspaceRecord = typeof WorkspaceRecord.Type;
-const decodeRecord = Schema.decodeEffect(Schema.fromJsonString(WorkspaceRecord));
+const decodeRecordJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
+const decodeRecordShape = Schema.decodeUnknownEffect(WorkspaceRecord);
+const normalizeWorkspaceRecord = (value: unknown) => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+  const record = { ...(value as Record<string, unknown>) };
+  if (record.provider === undefined && typeof record.runtime === "string") {
+    record.provider = record.runtime;
+  }
+  delete record.runtime;
+  if (typeof record.status === "object" && record.status !== null) {
+    const status = { ...(record.status as Record<string, unknown>) };
+    if (typeof status.destination === "object" && status.destination !== null) {
+      const destination = { ...(status.destination as Record<string, unknown>) };
+      if (destination.provider === undefined && typeof destination.runtime === "string") {
+        destination.provider = destination.runtime;
+      }
+      delete destination.runtime;
+      status.destination = destination;
+      record.status = status;
+    }
+  }
+  if (Array.isArray(record.staleContainers)) {
+    record.staleContainers = record.staleContainers.map((entry) => {
+      if (typeof entry !== "object" || entry === null) return entry;
+      const stale = { ...(entry as Record<string, unknown>) };
+      if (stale.provider === undefined && typeof stale.runtime === "string") {
+        stale.provider = stale.runtime;
+      }
+      delete stale.runtime;
+      return stale;
+    });
+  }
+  return record;
+};
+const decodeRecord = (text: string) =>
+  decodeRecordJson(text).pipe(
+    Effect.map(normalizeWorkspaceRecord),
+    Effect.flatMap(decodeRecordShape),
+  );
 const encodeRecord = Schema.encodeEffect(Schema.fromJsonString(WorkspaceRecord));
 const decodeConfig = Schema.decodeEffect(Schema.fromJsonString(ContainerConfig));
 const encodeConfig = Schema.encodeEffect(Schema.fromJsonString(ContainerConfig));

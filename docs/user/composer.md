@@ -387,8 +387,7 @@ Android opens a compatible installed file viewer.
 
 On web and desktop, choose **New container** or a managed container directly in an unsent
 draft's workspace menu, then Send. **New container** creates one container for that thread.
-Existing containers stay selectable and show **Active** or **Idle** instead of their runtime
-or raw status. Selection does not provision anything. First Send asks you to confirm the
+Existing containers stay selectable and show **Active** or **Idle** instead of raw status. Selection does not provision anything. First Send asks you to confirm the
 project's environment. **Save and continue** saves it and sends the preserved prompt only
 inside the guest. Later new containers reuse that setup, including intentionally empty
 scripts. The default image is `ubuntu:26.04`. Existing containers keep their recorded
@@ -405,23 +404,31 @@ issued message. Use the guest thread's Stop action for a committed run.
 Use **Settings > Containers** with project scope to edit setup and choose Inherit, Off or
 Custom cleanup. Host scope edits defaults. Aggregate scope shows each concrete target and
 saves each independently. Setup edits affect new containers. Cleanup uses current policy
-for existing runtimes. A managed container idles after its guest reports no running work for
+for existing containers. A managed container idles after its guest reports no running work for
 the configured window, two minutes by default. **Settings > Containers > Container cleanup >
 Idle after** changes that window; turn the switch off to keep containers running. An idle
 container wakes from the thread's **Wake container** action or when you open it from the
 workspace menu. The install script retries until successful and runs again when a
-removed runtime is recreated. The finite start script must finish before T3 is ready.
-Runtime removal keeps source files, guest home and history. Busy, unknown and unreachable
+removed container is recreated. The finite start script must finish before T3 is ready.
+Container removal keeps source files, guest home and history. Busy, unknown and unreachable
 guests are retained. Schedules do not wake an idle container.
 
-Docker and Podman are container runtime providers. **Settings > Containers** shows whether
-each is installed and responding on the host. The environment default selects the runtime
-for new containers, and a project can override it. Existing containers keep their recorded
-runtime, shown in Settings and on the workspace card. If that runtime is unavailable, start
-it or change the container to an available runtime. A runtime change recreates the container
-on the other provider and keeps the checkout, guest home, installed packages and threads. If
-the old runtime cannot be reached when you change, T3 removes its container later when that
-runtime is available again.
+Docker, Podman and Gondolin are container providers. **Settings > Containers** shows whether
+each is available on the host. The environment default selects the provider for new
+containers, and a project can override it. Existing containers keep their recorded provider,
+shown in Settings and on the workspace card. If that provider is unavailable, start it or
+change the container to an available provider. A provider change recreates the container and
+keeps the checkout, guest home, installed packages and threads. If the old provider cannot be
+reached when you change, T3 removes its container later when that provider is available again.
+
+Gondolin runs the workspace in a micro-VM instead of a Docker or Podman container. It needs
+QEMU on the host and a guest image built from an Ubuntu OCI rootfs, because the T3 guest
+runtime is a glibc binary. Build the image with Gondolin's custom image flow and point
+`T3CODE_GONDOLIN_GUEST_DIR` at the build output. Without QEMU or that image, Settings reports
+Gondolin as unavailable and other providers keep working. Gondolin allows HTTP and HTTPS
+egress. SSH remotes need Gondolin SSH egress configuration, which T3 does not expose yet.
+The VM lives with the T3 server process, so a server restart recreates it from the retained
+checkout and guest home.
 
 Container access requires full host maintenance permissions. Native mobile does not yet
 offer container creation or setup. Guest provider OAuth callbacks that require a

@@ -5,7 +5,8 @@ import {
   EnvironmentId,
   ProjectId,
   type ContainerDestination,
-  type ContainerRuntimeStatus,
+  type ContainerProviderKind,
+  type ContainerProviderStatus,
   type ContainerSettings,
   type ContainerStatus,
   type ContainerWorkspace,
@@ -13,21 +14,21 @@ import {
 import {
   containerActivityLabel,
   containerOptions,
-  containerRuntimeLabel,
-  containerRuntimeStatus,
+  containerProviderLabel,
+  containerProviderStatus,
   containerSettingsTargets,
 } from "./selection";
 import { resolveSettingsScope } from "../../components/settings/settingsScope";
 
-const available = (runtime: "docker" | "podman"): ContainerRuntimeStatus => ({
-  runtime,
+const available = (provider: ContainerProviderKind): ContainerProviderStatus => ({
+  provider,
   available: true,
   version: "test",
   detail: null,
   checkedAt: 0,
 });
-const unavailable = (runtime: "docker" | "podman"): ContainerRuntimeStatus => ({
-  runtime,
+const unavailable = (provider: ContainerProviderKind): ContainerProviderStatus => ({
+  provider,
   available: false,
   version: null,
   detail: "not installed",
@@ -39,7 +40,7 @@ const destination: ContainerDestination = {
   guestEnvironmentId: EnvironmentId.make("guest"),
   guestProjectId: ProjectId.make("guest-project"),
   guestCheckoutPath: "/repo/t3code",
-  runtime: "docker",
+  provider: "docker",
   label: "t3code · ubuntu:26.04",
 };
 const workspace = (overrides: Partial<ContainerWorkspace> = {}): ContainerWorkspace => ({
@@ -48,30 +49,31 @@ const workspace = (overrides: Partial<ContainerWorkspace> = {}): ContainerWorksp
   projectId: ProjectId.make("project"),
   checkoutPath: "/repo/t3code",
   image: "ubuntu:26.04",
-  runtime: "docker",
+  provider: "docker",
   status: { type: "stopped" },
   lastUsedAt: 0,
   ...overrides,
 });
 const settings = (overrides: Partial<ContainerSettings> = {}): ContainerSettings => ({
   config: DEFAULT_CONTAINER_CONFIG,
-  runtime: { default: "docker", project: null, resolved: "docker" },
-  runtimes: [available("docker"), available("podman")],
+  provider: { default: "docker", project: null, resolved: "docker" },
+  providers: [available("docker"), available("podman")],
   workspaces: [],
   available: true,
   ...overrides,
 });
 
-describe("container runtime labels", () => {
+describe("container provider labels", () => {
   it("labels the fixed providers", () => {
-    expect(containerRuntimeLabel("docker")).toBe("Docker");
-    expect(containerRuntimeLabel("podman")).toBe("Podman");
+    expect(containerProviderLabel("docker")).toBe("Docker");
+    expect(containerProviderLabel("podman")).toBe("Podman");
+    expect(containerProviderLabel("gondolin")).toBe("Gondolin");
   });
 
-  it("finds the provider status by runtime", () => {
-    const value = settings({ runtimes: [available("docker"), unavailable("podman")] });
-    expect(containerRuntimeStatus(value, "podman")?.available).toBe(false);
-    expect(containerRuntimeStatus(null, "docker")).toBeNull();
+  it("finds the provider status by provider", () => {
+    const value = settings({ providers: [available("docker"), unavailable("podman")] });
+    expect(containerProviderStatus(value, "podman")?.available).toBe(false);
+    expect(containerProviderStatus(null, "docker")).toBeNull();
   });
 });
 
@@ -100,7 +102,7 @@ describe("containerActivityLabel", () => {
 });
 
 describe("containerOptions", () => {
-  it("labels a new container without runtime noise", () => {
+  it("labels a new container without provider noise", () => {
     expect(containerOptions(settings())[0]).toEqual({
       value: "container:fresh",
       label: "New container",
@@ -108,15 +110,15 @@ describe("containerOptions", () => {
     expect(
       containerOptions(
         settings({
-          runtime: { default: "podman", project: "podman", resolved: "podman" },
-          runtimes: [unavailable("docker"), unavailable("podman")],
+          provider: { default: "podman", project: "podman", resolved: "podman" },
+          providers: [unavailable("docker"), unavailable("podman")],
         }),
       )[0],
     ).toEqual({ value: "container:fresh", label: "New container" });
     expect(containerOptions(null)[0]).toEqual({ value: "container:fresh", label: "New container" });
   });
 
-  it("shows activity instead of runtime, availability, raw status or id", () => {
+  it("shows activity instead of provider, availability, raw status or id", () => {
     const options = containerOptions(
       settings({
         workspaces: [
@@ -128,11 +130,11 @@ describe("containerOptions", () => {
           workspace({
             id: ContainerWorkspaceId.make("ijklmnop-two"),
             checkoutPath: "/repo/other",
-            runtime: "podman",
+            provider: "podman",
             lastUsedAt: 1,
           }),
         ],
-        runtimes: [available("docker"), unavailable("podman")],
+        providers: [available("docker"), unavailable("podman")],
       }),
     );
     expect(options).toEqual([

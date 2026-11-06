@@ -8,7 +8,7 @@ import {
   DEFAULT_CONTAINER_CONFIG,
   EnvironmentId,
   ProjectId,
-  type ContainerRuntimeKind,
+  type ContainerProviderKind,
   type Project,
 } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
@@ -30,7 +30,8 @@ import * as ProcessRunner from "../processRunner.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as ContainerWorkspaces from "./ContainerWorkspaces.ts";
 import * as Engine from "./engine.ts";
-import * as Runtime from "./bootstrap.ts";
+import * as GuestRuntime from "./bootstrap.ts";
+import * as Providers from "./providers.ts";
 import * as Registry from "./registry.ts";
 import * as Guest from "./GuestConnection.ts";
 
@@ -60,63 +61,97 @@ const fixture = Effect.gen(function* () {
   };
   const commands: Array<ReadonlyArray<string>> = [];
   const runtimeCommands: Array<{
-    readonly runtime: ContainerRuntimeKind;
+    readonly runtime: ContainerProviderKind;
     readonly args: ReadonlyArray<string>;
   }> = [];
   const projects = new Map([[projectId, project]]);
   let stageHook = Effect.void;
   let idleHook = Effect.void;
   const objects = new Map<string, Engine.Inspection>();
-  const availableRuntimes = new Map<ContainerRuntimeKind, boolean>([
+  const availableProviders = new Map<ContainerProviderKind, boolean>([
     ["docker", true],
     ["podman", true],
+    ["gondolin", false],
   ]);
-  const objectKey = (runtime: ContainerRuntimeKind, name: string) => `${runtime}:${name}`;
+  const objectKey = (provider: ContainerProviderKind, name: string) => `${provider}:${name}`;
   let busy = false;
   let failure = false;
   let identities = 0;
   let containerSequence = 0;
+  const recordCommand = (provider: ContainerProviderKind, args: ReadonlyArray<string>) => {
+    commands.push(args);
+    runtimeCommands.push({ runtime: provider, args });
+  };
   const engine = Engine.ContainerEngine.of({
-    inspect: (runtime, name) => Effect.succeed(objects.get(objectKey(runtime, name)) ?? null),
-    status: (runtime) =>
+    inspect: (provider, name) => Effect.succeed(objects.get(objectKey(provider, name)) ?? null),
+    status: (provider) =>
       Effect.succeed({
-        runtime,
-        available: availableRuntimes.get(runtime) ?? true,
+        provider,
+        available: availableProviders.get(provider) ?? true,
         version: "test-version",
         detail: null,
         checkedAt: 0,
       }),
-    run: (runtime, stage, args) =>
+    create: (input) =>
       Effect.sync(() => {
-        commands.push(args);
-        runtimeCommands.push({ runtime, args });
-        if (args[0] === "create") {
-          const name = args[args.indexOf("--name") + 1]!;
-          const id = `container-${containerSequence++}`;
-          const workspaceId = name.slice("t3-workspace-".length);
-          objects.set(objectKey(runtime, name), {
-            Id: id,
-            Config: { Labels: { "codes.t3.owner": hostId, "codes.t3.workspace": workspaceId } },
-            State: { Running: false },
-            Mounts: args.flatMap((argument, index) => {
-              if (args[index - 1] !== "--mount") return [];
-              const values = Object.fromEntries(argument.split(",").map((part) => part.split("=")));
-              return values.source && values.target
-                ? [{ Source: values.source, Destination: values.target }]
-                : [];
-            }),
-            NetworkSettings: { Ports: {} },
-          });
-          return id;
-        }
-        const name = args.at(-1)!;
-        const key = objectKey(runtime, name);
-        const object = objects.get(key);
-        if (object && stage === "start") objects.set(key, { ...object, State: { Running: true } });
-        if (object && stage === "stop") objects.set(key, { ...object, State: { Running: false } });
-        if (stage === "remove") objects.delete(key);
-        return "";
+        recordCommand(input.provider, [
+          "create",
+          "--name",
+          input.name,
+          ...input.mounts.flatMap((mount) => [
+            "--mount",
+            `type=bind,source=${mount.source},target=${mount.target}`,
+          ]),
+        ]);
+        const id = `container-${containerSequence++}`;
+        objects.set(objectKey(input.provider, input.name), {
+          Id: id,
+          Config: {
+            Labels: {
+              "codes.t3.owner": input.ownerEnvironmentId,
+              "codes.t3.workspace": input.workspaceId,
+            },
+          },
+          State: { Running: false },
+          Mounts: [
+            ...input.mounts,
+            { source: input.homePath, target: "/home/t3" },
+            { source: input.runtimePath, target: "/opt/t3" },
+            { source: input.scriptPath, target: "/t3-bootstrap.sh" },
+          ].map((mount) => ({ Source: mount.source, Destination: mount.target })),
+          NetworkSettings: { Ports: {} },
+        });
+        return id;
       }),
+    start: (provider, name) =>
+      Effect.sync(() => {
+        recordCommand(provider, ["start", name]);
+        const key = objectKey(provider, name);
+        const object = objects.get(key);
+        if (object) objects.set(key, { ...object, State: { Running: true } });
+      }),
+    stop: (provider, name) =>
+      Effect.sync(() => {
+        recordCommand(provider, ["stop", name]);
+        const key = objectKey(provider, name);
+        const object = objects.get(key);
+        if (object) objects.set(key, { ...object, State: { Running: false } });
+      }),
+    remove: (provider, name) =>
+      Effect.sync(() => {
+        recordCommand(provider, ["remove", name]);
+        objects.delete(objectKey(provider, name));
+      }),
+    exec: () => Effect.succeed(""),
+  });
+  const providers = Providers.ContainerProviders.of({
+    status: (provider, options) => engine.status(provider, options),
+    inspect: (provider, name) => engine.inspect(provider, name),
+    create: (input) => engine.create(input),
+    start: (provider, name) => engine.start(provider, name),
+    stop: (provider, name) => engine.stop(provider, name),
+    remove: (provider, name) => engine.remove(provider, name),
+    exec: (provider, name, command, options) => engine.exec(provider, name, command, options),
   });
   const guest = Guest.GuestConnection.of({
     origin: () => Effect.succeed("http://127.0.0.1:3773"),
@@ -135,10 +170,10 @@ const fixture = Effect.gen(function* () {
   });
   const layers = ContainerWorkspaces.layer.pipe(
     Layer.provideMerge(Registry.layer),
-    Layer.provide(Layer.succeed(Engine.ContainerEngine, engine)),
+    Layer.provide(Layer.succeed(Providers.ContainerProviders, providers)),
     Layer.provide(Layer.succeed(Guest.GuestConnection, guest)),
     Layer.provide(
-      Layer.mock(Runtime.ContainerRuntime)({
+      Layer.mock(GuestRuntime.GuestRuntime)({
         stage: (directory) =>
           stageHook.pipe(Effect.as({ path: directory, revision: "bundled-revision" })),
       }),
@@ -197,8 +232,8 @@ const fixture = Effect.gen(function* () {
     fail: (value: boolean) => {
       failure = value;
     },
-    runtimeAvailable: (runtime: ContainerRuntimeKind, available: boolean) => {
-      availableRuntimes.set(runtime, available);
+    providerAvailable: (runtime: ContainerProviderKind, available: boolean) => {
+      availableProviders.set(runtime, available);
     },
     identities: () => identities,
   };
@@ -607,7 +642,7 @@ it.effect("decodes workspace records without runtime or stale containers", () =>
       containerId: null,
       guest: null,
     });
-    expect(record.runtime).toBe("docker");
+    expect(record.provider).toBe("docker");
     expect(record.staleContainers).toEqual([]);
   }),
 );
@@ -616,17 +651,17 @@ it.effect("resolves the runtime from project settings for new containers", () =>
   Effect.gen(function* () {
     const f = yield* confirmedFixture;
     yield* f.settings.updateSettings({
-      projectSettingsOverrides: { [f.input.projectId]: { containerRuntime: "podman" } },
+      projectSettingsOverrides: { [f.input.projectId]: { containerProvider: "podman" } },
     });
     const destination = yield* f.service.open(f.input);
     const settings = yield* f.service.settings({ projectId: f.input.projectId });
-    expect(settings.runtime).toEqual({
+    expect(settings.provider).toEqual({
       default: "docker",
       project: "podman",
       resolved: "podman",
     });
-    expect(destination.runtime).toBe("podman");
-    expect((yield* f.registry.list)[0]?.runtime).toBe("podman");
+    expect(destination.provider).toBe("podman");
+    expect((yield* f.registry.list)[0]?.provider).toBe("podman");
     expect(
       f.runtimeCommands.filter(({ args }) => args[0] === "create").map(({ runtime }) => runtime),
     ).toEqual(["podman"]);
@@ -640,8 +675,8 @@ it.effect("keeps an existing container on its recorded runtime when the default 
   Effect.gen(function* () {
     const f = yield* confirmedFixture;
     const destination = yield* f.service.open(f.input);
-    yield* f.settings.updateSettings({ containerRuntime: "podman" });
-    expect((yield* f.service.settings({ projectId: f.input.projectId })).runtime).toEqual({
+    yield* f.settings.updateSettings({ containerProvider: "podman" });
+    expect((yield* f.service.settings({ projectId: f.input.projectId })).provider).toEqual({
       default: "podman",
       project: null,
       resolved: "podman",
@@ -650,18 +685,18 @@ it.effect("keeps an existing container on its recorded runtime when the default 
       ...f.input,
       selection: { type: "existing", workspaceId: destination.workspaceId },
     });
-    expect(reopened.runtime).toBe("docker");
-    expect((yield* f.registry.list)[0]?.runtime).toBe("docker");
+    expect(reopened.provider).toBe("docker");
+    expect((yield* f.registry.list)[0]?.provider).toBe("docker");
   }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );
 
 it.effect("fails a selected runtime that is unavailable before creating a container", () =>
   Effect.gen(function* () {
     const f = yield* confirmedFixture;
-    f.runtimeAvailable("podman", false);
-    yield* f.settings.updateSettings({ containerRuntime: "podman" });
+    f.providerAvailable("podman", false);
+    yield* f.settings.updateSettings({ containerProvider: "podman" });
     expect(yield* f.service.open(f.input).pipe(Effect.flip)).toMatchObject({
-      reason: "runtime-unavailable",
+      reason: "provider-unavailable",
     });
     expect(f.runtimeCommands).toEqual([]);
     expect(yield* f.registry.list).toEqual([]);
@@ -679,15 +714,15 @@ it.effect(
       const marker = `${before.directory}/home/.installed-${before.runtimeRevision}`;
       yield* fs.writeFileString(marker, "success");
       yield* fs.writeFileString(`${before.directory}/home/history-sentinel`, "retained");
-      const changed = yield* f.service.changeRuntime({
+      const changed = yield* f.service.changeProvider({
         workspaceId: destination.workspaceId,
-        runtime: "podman",
+        provider: "podman",
       });
       const after = (yield* f.registry.list)[0]!;
-      expect(changed.runtime).toBe("podman");
+      expect(changed.provider).toBe("podman");
       expect(changed.guestEnvironmentId).toBe(destination.guestEnvironmentId);
       expect(changed.guestCheckoutPath).toBe(destination.guestCheckoutPath);
-      expect(after.runtime).toBe("podman");
+      expect(after.provider).toBe("podman");
       expect(after.directory).toBe(before.directory);
       expect(after.runtimePath).toBe(before.runtimePath);
       expect(after.runtimeRevision).toBe(before.runtimeRevision);
@@ -712,18 +747,20 @@ it.effect("records a stale container when the old runtime is unavailable and cle
     const f = yield* confirmedFixture;
     const destination = yield* f.service.open(f.input);
     const before = (yield* f.registry.list)[0]!;
-    f.runtimeAvailable("docker", false);
-    const changed = yield* f.service.changeRuntime({
+    f.providerAvailable("docker", false);
+    const changed = yield* f.service.changeProvider({
       workspaceId: destination.workspaceId,
-      runtime: "podman",
+      provider: "podman",
     });
     const name = Guest.containerName(destination.workspaceId);
-    expect(changed.runtime).toBe("podman");
+    expect(changed.provider).toBe("podman");
     let after = (yield* f.registry.list)[0]!;
-    expect(after.staleContainers).toEqual([{ runtime: "docker", containerId: before.containerId }]);
+    expect(after.staleContainers).toEqual([
+      { provider: "docker", containerId: before.containerId },
+    ]);
     expect(f.objects.has(`docker:${name}`)).toBe(true);
     expect(f.objects.has(`podman:${name}`)).toBe(true);
-    f.runtimeAvailable("docker", true);
+    f.providerAvailable("docker", true);
     yield* f.service.cleanup;
     after = (yield* f.registry.list)[0]!;
     expect(after.staleContainers).toEqual([]);
@@ -738,10 +775,10 @@ it.effect("refuses a runtime change while the guest is busy", () =>
     f.busy(true);
     expect(
       yield* f.service
-        .changeRuntime({ workspaceId: destination.workspaceId, runtime: "podman" })
+        .changeProvider({ workspaceId: destination.workspaceId, provider: "podman" })
         .pipe(Effect.flip),
     ).toMatchObject({ reason: "busy" });
-    expect((yield* f.registry.list)[0]?.runtime).toBe("docker");
+    expect((yield* f.registry.list)[0]?.provider).toBe("docker");
     f.busy(false);
   }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );
@@ -750,17 +787,17 @@ it.effect("uses the recorded runtime for existing container actions and reopens"
   Effect.gen(function* () {
     const f = yield* confirmedFixture;
     yield* f.settings.updateSettings({
-      projectSettingsOverrides: { [f.input.projectId]: { containerRuntime: "podman" } },
+      projectSettingsOverrides: { [f.input.projectId]: { containerProvider: "podman" } },
     });
     const destination = yield* f.service.open(f.input);
-    f.runtimeAvailable("docker", false);
+    f.providerAvailable("docker", false);
     yield* f.service.act({ workspaceId: destination.workspaceId, action: "stop" });
     expect(f.runtimeCommands.find(({ args }) => args[0] === "stop")?.runtime).toBe("podman");
     const reopened = yield* f.service.open({
       ...f.input,
       selection: { type: "existing", workspaceId: destination.workspaceId },
     });
-    expect(reopened.runtime).toBe("podman");
+    expect(reopened.provider).toBe("podman");
   }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );
 
@@ -768,15 +805,15 @@ it.effect("changing back to a stale runtime replaces its old container and drops
   Effect.gen(function* () {
     const f = yield* confirmedFixture;
     const destination = yield* f.service.open(f.input);
-    f.runtimeAvailable("docker", false);
-    yield* f.service.changeRuntime({ workspaceId: destination.workspaceId, runtime: "podman" });
-    f.runtimeAvailable("docker", true);
-    const changed = yield* f.service.changeRuntime({
+    f.providerAvailable("docker", false);
+    yield* f.service.changeProvider({ workspaceId: destination.workspaceId, provider: "podman" });
+    f.providerAvailable("docker", true);
+    const changed = yield* f.service.changeProvider({
       workspaceId: destination.workspaceId,
-      runtime: "docker",
+      provider: "docker",
     });
     const name = Guest.containerName(destination.workspaceId);
-    expect(changed.runtime).toBe("docker");
+    expect(changed.provider).toBe("docker");
     expect((yield* f.registry.list)[0]?.staleContainers).toEqual([]);
     yield* f.service.cleanup;
     expect(f.objects.has(`docker:${name}`)).toBe(true);
@@ -786,14 +823,63 @@ it.effect("changing back to a stale runtime replaces its old container and drops
 it.effect("uses the environment default runtime for new containers", () =>
   Effect.gen(function* () {
     const f = yield* confirmedFixture;
-    yield* f.settings.updateSettings({ containerRuntime: "podman" });
+    yield* f.settings.updateSettings({ containerProvider: "podman" });
     const destination = yield* f.service.open(f.input);
-    expect(destination.runtime).toBe("podman");
-    expect((yield* f.registry.list)[0]?.runtime).toBe("podman");
-    expect((yield* f.service.settings({ projectId: f.input.projectId })).runtime).toEqual({
+    expect(destination.provider).toBe("podman");
+    expect((yield* f.registry.list)[0]?.provider).toBe("podman");
+    expect((yield* f.service.settings({ projectId: f.input.projectId })).provider).toEqual({
       default: "podman",
       project: null,
       resolved: "podman",
     });
+  }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+);
+
+it.effect("reads legacy runtime workspace records as providers", () =>
+  Effect.gen(function* () {
+    const f = yield* fixture;
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    yield* fs.makeDirectory(f.registry.root, { recursive: true });
+    yield* fs.writeFileString(
+      path.join(f.registry.root, "legacy.workspace.json"),
+      JSON.stringify({
+        id: ContainerWorkspaceId.make("legacy"),
+        operationId: ContainerOperationId.make("legacy-operation"),
+        ownership: "managed",
+        ownerEnvironmentId: EnvironmentId.make("host"),
+        projectId: f.input.projectId,
+        checkoutPath: f.input.checkoutPath,
+        image: "ubuntu:26.04",
+        config: DEFAULT_CONTAINER_CONFIG,
+        status: {
+          type: "ready",
+          destination: {
+            hostEnvironmentId: EnvironmentId.make("host"),
+            workspaceId: ContainerWorkspaceId.make("legacy"),
+            guestEnvironmentId: EnvironmentId.make("guest"),
+            guestProjectId: ProjectId.make("guest-project"),
+            guestCheckoutPath: f.input.checkoutPath,
+            runtime: "docker",
+            label: "legacy",
+          },
+        },
+        lastUsedAt: 0,
+        runtimeRevision: "revision",
+        runtimePath: "/runtime",
+        directory: "/state",
+        mounts: [],
+        containerId: null,
+        runtime: "podman",
+        staleContainers: [{ runtime: "docker", containerId: "old-container" }],
+        guest: null,
+      }),
+    );
+    const [record] = yield* f.registry.list;
+    expect(record?.provider).toBe("podman");
+    expect(record?.staleContainers).toEqual([{ provider: "docker", containerId: "old-container" }]);
+    expect(record?.status.type === "ready" ? record.status.destination.provider : null).toBe(
+      "docker",
+    );
   }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );

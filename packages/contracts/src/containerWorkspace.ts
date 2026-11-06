@@ -13,22 +13,23 @@ export const CONTAINER_GUEST_SCOPES = AuthStandardClientScopes.filter(
 );
 export const CONTAINER_HOST_SCOPES = [AuthEnvironmentMaintainScope, ...CONTAINER_GUEST_SCOPES];
 
-export const ContainerRuntimeKind = Schema.Literals(["docker", "podman"]);
-export type ContainerRuntimeKind = typeof ContainerRuntimeKind.Type;
-export const CONTAINER_RUNTIME_KINDS = ["docker", "podman"] as const;
-export const CONTAINER_RUNTIME_LABELS: Record<ContainerRuntimeKind, string> = {
+export const ContainerProviderKind = Schema.Literals(["docker", "podman", "gondolin"]);
+export type ContainerProviderKind = typeof ContainerProviderKind.Type;
+export const CONTAINER_PROVIDER_KINDS = ["docker", "podman", "gondolin"] as const;
+export const CONTAINER_PROVIDER_LABELS: Record<ContainerProviderKind, string> = {
   docker: "Docker",
   podman: "Podman",
+  gondolin: "Gondolin",
 };
 
-export const ContainerRuntimeStatus = Schema.Struct({
-  runtime: ContainerRuntimeKind,
+export const ContainerProviderStatus = Schema.Struct({
+  provider: ContainerProviderKind,
   available: Schema.Boolean,
   version: Schema.NullOr(Schema.String),
   detail: Schema.NullOr(Schema.String),
   checkedAt: Schema.Number,
 });
-export type ContainerRuntimeStatus = typeof ContainerRuntimeStatus.Type;
+export type ContainerProviderStatus = typeof ContainerProviderStatus.Type;
 
 export const ContainerWorkspaceId = Schema.String.pipe(
   Schema.check(Schema.isPattern(/^[a-zA-Z0-9-]{1,80}$/)),
@@ -132,7 +133,7 @@ export const ContainerDestination = Schema.Struct({
   guestEnvironmentId: EnvironmentId,
   guestProjectId: ProjectId,
   guestCheckoutPath: Schema.String,
-  runtime: ContainerRuntimeKind,
+  provider: ContainerProviderKind,
   label: Schema.String,
 });
 export type ContainerDestination = typeof ContainerDestination.Type;
@@ -150,7 +151,7 @@ export const ContainerWorkspace = Schema.Struct({
   projectId: ProjectId,
   checkoutPath: Schema.String,
   image: Schema.String,
-  runtime: ContainerRuntimeKind.pipe(Schema.withDecodingDefault(Effect.succeed("docker"))),
+  provider: ContainerProviderKind.pipe(Schema.withDecodingDefault(Effect.succeed("docker"))),
   status: ContainerStatus,
   lastUsedAt: Schema.Number,
 });
@@ -163,25 +164,25 @@ export type ContainerActionInput = typeof ContainerActionInput.Type;
 export const ContainerListInput = Schema.Struct({
   projectId: Schema.optionalKey(ProjectId),
   checkoutPath: Schema.optionalKey(Schema.String),
-  refreshRuntimes: Schema.optionalKey(Schema.Boolean),
+  refreshProviders: Schema.optionalKey(Schema.Boolean),
 });
-export const ChangeContainerRuntimeInput = Schema.Struct({
+export const ChangeContainerProviderInput = Schema.Struct({
   workspaceId: ContainerWorkspaceId,
-  runtime: ContainerRuntimeKind,
+  provider: ContainerProviderKind,
 });
-export type ChangeContainerRuntimeInput = typeof ChangeContainerRuntimeInput.Type;
+export type ChangeContainerProviderInput = typeof ChangeContainerProviderInput.Type;
 export const WakeContainerInput = Schema.Struct({
   workspaceId: ContainerWorkspaceId,
 });
 export type WakeContainerInput = typeof WakeContainerInput.Type;
 export const ContainerSettings = Schema.Struct({
   config: ContainerConfig,
-  runtime: Schema.Struct({
-    default: ContainerRuntimeKind,
-    project: Schema.NullOr(ContainerRuntimeKind),
-    resolved: ContainerRuntimeKind,
+  provider: Schema.Struct({
+    default: ContainerProviderKind,
+    project: Schema.NullOr(ContainerProviderKind),
+    resolved: ContainerProviderKind,
   }),
-  runtimes: Schema.Array(ContainerRuntimeStatus),
+  providers: Schema.Array(ContainerProviderStatus),
   workspaces: Schema.Array(ContainerWorkspace),
   available: Schema.Boolean,
   project: Schema.optionalKey(
@@ -228,8 +229,8 @@ export class ContainerError extends Schema.TaggedError<ContainerError>()("Contai
   stage: Schema.String,
   reason: Schema.Literals([
     "unavailable",
-    "runtime-unavailable",
-    "runtime-required",
+    "provider-unavailable",
+    "guest-runtime-required",
     "engine-failed",
     "invalid-checkout",
     "invalid-environment",
@@ -247,12 +248,12 @@ export class ContainerError extends Schema.TaggedError<ContainerError>()("Contai
 }) {
   override get message(): string {
     switch (this.reason) {
-      case "runtime-required":
+      case "guest-runtime-required":
         return "A matching Linux T3 runtime is required. Set T3CODE_CONTAINER_RUNTIME to a complete runtime directory or archive built from this revision.";
       case "unavailable":
-        return "Container engine unavailable. Install Docker or choose an available runtime in Settings > Containers.";
-      case "runtime-unavailable":
-        return "The selected container runtime is unavailable. Start it or choose another runtime in Settings > Containers.";
+        return "Container provider unavailable. Install Docker, Podman or Gondolin in Settings > Containers.";
+      case "provider-unavailable":
+        return "The selected container provider is unavailable. Start it or choose another provider in Settings > Containers.";
       case "engine-failed":
         return `Container ${this.stage} failed. Check the container logs before retrying. Install retries may repeat partially completed work.`;
       case "invalid-checkout":

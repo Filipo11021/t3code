@@ -46,7 +46,7 @@ import {
   ContainerListInput,
   ContainerSettings,
   ContainerWorkspace,
-  ChangeContainerRuntimeInput,
+  ChangeContainerProviderInput,
   OpenContainerInput,
   WakeContainerInput,
 } from "./containerWorkspace.ts";
@@ -430,7 +430,7 @@ export const WS_METHODS = {
   containerGuestInspect: "containerGuest.inspect",
   containersAct: "containers.act",
   containersCleanup: "containers.cleanup",
-  containersChangeRuntime: "containers.changeRuntime",
+  containersChangeProvider: "containers.changeProvider",
   containersWake: "containers.wake",
   projectsListEntries: "projects.listEntries",
   projectsListIgnoredFiles: "projects.listIgnoredFiles",
@@ -2049,8 +2049,8 @@ export const WsRpcGroup = RpcGroup.make(
     error: ContainerError,
   }),
   Rpc.make(WS_METHODS.containersCleanup, { error: ContainerError }),
-  Rpc.make(WS_METHODS.containersChangeRuntime, {
-    payload: ChangeContainerRuntimeInput,
+  Rpc.make(WS_METHODS.containersChangeProvider, {
+    payload: ChangeContainerProviderInput,
     success: ContainerDestination,
     error: ContainerError,
   }),

@@ -518,15 +518,15 @@ describe("server model preferences", () => {
 
 describe("container runtime", () => {
   it("defaults to Docker and carries environment and project overrides", () => {
-    expect(decodeServerSettings({}).containerRuntime).toBe("docker");
-    expect(decodeServerSettingsPatch({ containerRuntime: "podman" }).containerRuntime).toBe(
+    expect(decodeServerSettings({}).containerProvider).toBe("docker");
+    expect(decodeServerSettingsPatch({ containerProvider: "podman" }).containerProvider).toBe(
       "podman",
     );
     const projectId = ProjectId.make("project-container-runtime");
     const settings = decodeServerSettings({
-      projectSettingsOverrides: { [projectId]: { containerRuntime: "podman" } },
+      projectSettingsOverrides: { [projectId]: { containerProvider: "podman" } },
     });
-    expect(settings.projectSettingsOverrides[projectId]?.containerRuntime).toBe("podman");
-    expect(PROJECT_SCOPED_SERVER_SETTING_KEYS).toContain("containerRuntime");
+    expect(settings.projectSettingsOverrides[projectId]?.containerProvider).toBe("podman");
+    expect(PROJECT_SCOPED_SERVER_SETTING_KEYS).toContain("containerProvider");
   });
 });

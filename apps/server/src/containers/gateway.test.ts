@@ -45,7 +45,7 @@ const record: WorkspaceRecord = {
   directory: "/state",
   mounts: [{ source: "/repo", target: "/repo" }],
   containerId: "container",
-  runtime: "docker",
+  provider: "docker",
   staleContainers: [],
   guest: null,
 };

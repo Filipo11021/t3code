@@ -1,17 +1,17 @@
 import {
-  CONTAINER_RUNTIME_KINDS,
+  CONTAINER_PROVIDER_KINDS,
   ContainerError,
   ContainerWorkspaceId,
   DEFAULT_CONTAINER_CONFIG,
   type ContainerActionInput,
-  type ChangeContainerRuntimeInput,
+  type ChangeContainerProviderInput,
   ContainerConfig,
   ContainerSetup,
   ContainerConfigurationRevision,
   ContainerCleanupRules,
   ContainerConfigWrite,
   ConfigureProjectContainerInput,
-  type ContainerRuntimeKind,
+  type ContainerProviderKind,
   type ProjectId,
   type ContainerDestination,
   type ContainerListInput,
@@ -43,8 +43,8 @@ import * as ServerConfig from "../config.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import * as ContainerEngine from "./engine.ts";
-import * as ContainerRuntime from "./bootstrap.ts";
+import * as ContainerProviders from "./providers.ts";
+import * as GuestRuntime from "./bootstrap.ts";
 import * as ContainerRegistry from "./registry.ts";
 import * as GuestConnection from "./GuestConnection.ts";
 
@@ -75,8 +75,8 @@ export class ContainerWorkspaces extends Context.Service<
       input: WakeContainerInput,
     ) => Effect.Effect<ContainerDestination, ContainerError>;
     readonly idle: Effect.Effect<void, ContainerError>;
-    readonly changeRuntime: (
-      input: ChangeContainerRuntimeInput,
+    readonly changeProvider: (
+      input: ChangeContainerProviderInput,
     ) => Effect.Effect<ContainerDestination, ContainerError>;
     readonly cleanup: Effect.Effect<void, ContainerError>;
     readonly route: (id: ContainerWorkspaceId) => Effect.Effect<
@@ -96,15 +96,15 @@ const asWorkspace = (record: WorkspaceRecord): ContainerWorkspace => ({
   projectId: record.projectId,
   checkoutPath: record.checkoutPath,
   image: record.image,
-  runtime: record.runtime,
+  provider: record.provider,
   status: record.status,
   lastUsedAt: record.lastUsedAt,
 });
 
 const make = Effect.gen(function* () {
   const registry = yield* ContainerRegistry.ContainerRegistry;
-  const engine = yield* ContainerEngine.ContainerEngine;
-  const runtime = yield* ContainerRuntime.ContainerRuntime;
+  const providers = yield* ContainerProviders.ContainerProviders;
+  const guestRuntime = yield* GuestRuntime.GuestRuntime;
   const guests = yield* GuestConnection.GuestConnection;
   const projects = yield* ProjectService.ProjectService;
   const environment = yield* ServerEnvironment.ServerEnvironment;
@@ -130,7 +130,7 @@ const make = Effect.gen(function* () {
   >();
   const fail = (stage: string, reason: ContainerError["reason"]) =>
     new ContainerError({ stage, reason });
-  const runtimeSettings = Effect.fn("ContainerWorkspaces.runtimeSettings")(function* (
+  const providerSettings = Effect.fn("ContainerWorkspaces.providerSettings")(function* (
     projectId: ProjectId | null,
   ) {
     const settings = yield* serverSettings.getSettings.pipe(
@@ -139,12 +139,12 @@ const make = Effect.gen(function* () {
       ),
     );
     return {
-      default: settings.containerRuntime,
+      default: settings.containerProvider,
       project:
         projectId === null
           ? null
-          : (settings.projectSettingsOverrides[projectId]?.containerRuntime ?? null),
-      resolved: resolveProjectSettings(settings, projectId).settings.containerRuntime,
+          : (settings.projectSettingsOverrides[projectId]?.containerProvider ?? null),
+      resolved: resolveProjectSettings(settings, projectId).settings.containerProvider,
     };
   });
   const guard = guestMode === "1" ? Effect.fail(fail("host", "disabled")) : Effect.void;
@@ -227,10 +227,10 @@ const make = Effect.gen(function* () {
     let record = original;
     try {
       if (record.ownership !== "managed") return yield* fail("start", "not-owned");
-      const runtimeStatus = yield* engine.status(record.runtime);
-      if (!runtimeStatus.available) return yield* fail("start", "runtime-unavailable");
-      let inspected = yield* engine.inspect(
-        record.runtime,
+      const providerStatus = yield* providers.status(record.provider);
+      if (!providerStatus.available) return yield* fail("start", "provider-unavailable");
+      let inspected = yield* providers.inspect(
+        record.provider,
         GuestConnection.containerName(record.id),
       );
       if (inspected) {
@@ -277,7 +277,7 @@ const make = Effect.gen(function* () {
         yield* fs
           .writeFileString(
             script,
-            ContainerRuntime.bootstrapScript({
+            GuestRuntime.bootstrapScript({
               uid: process.getuid?.() || 1000,
               gid: process.getgid?.() || 1000,
               checkout: record.checkoutPath,
@@ -290,46 +290,30 @@ const make = Effect.gen(function* () {
               (cause) => new ContainerError({ stage: "bootstrap", reason: "persistence", cause }),
             ),
           );
-        const mounts = [
-          ...record.mounts,
-          { source: home, target: ContainerRuntime.GUEST_HOME },
-          { source: record.runtimePath, target: ContainerRuntime.GUEST_RUNTIME },
-          { source: script, target: "/t3-bootstrap.sh" },
-        ];
-        const id = yield* engine.run(record.runtime, "create", [
-          "create",
-          "--name",
-          GuestConnection.containerName(record.id),
-          "--init",
-          "--label",
-          `codes.t3.owner=${owner}`,
-          "--label",
-          `codes.t3.workspace=${record.id}`,
-          "--label",
-          `codes.t3.operation=${record.operationId}`,
-          "--label",
-          `codes.t3.revision=${record.runtimeRevision}`,
-          "--publish",
-          `127.0.0.1::${ContainerRuntime.GUEST_PORT}`,
-          ...mounts.flatMap((mount) => [
-            "--mount",
-            `type=bind,source=${mount.source},target=${mount.target}${("readonly" in mount && mount.readonly) || mount.target === ContainerRuntime.GUEST_RUNTIME || mount.target === "/t3-bootstrap.sh" ? ",readonly" : ""}`,
-          ]),
-          "--workdir",
-          record.checkoutPath,
-          record.image,
-          "/bin/bash",
-          "/t3-bootstrap.sh",
-        ]);
+        const id = yield* providers.create({
+          provider: record.provider,
+          workspaceId: record.id,
+          name: GuestConnection.containerName(record.id),
+          ownerEnvironmentId: owner,
+          operationId: record.operationId,
+          revision: record.runtimeRevision,
+          image: record.image,
+          checkoutPath: record.checkoutPath,
+          directory: record.directory,
+          mounts: record.mounts,
+          homePath: home,
+          runtimePath: record.runtimePath,
+          scriptPath: script,
+        });
         record = { ...record, containerId: id, status: { type: "provisioning", stage: "start" } };
         yield* registry.save(record);
-        inspected = yield* engine.inspect(record.runtime, GuestConnection.containerName(record.id));
+        inspected = yield* providers.inspect(
+          record.provider,
+          GuestConnection.containerName(record.id),
+        );
       }
       if (!inspected?.State.Running)
-        yield* engine.run(record.runtime, "start", [
-          "start",
-          GuestConnection.containerName(record.id),
-        ]);
+        yield* providers.start(record.provider, GuestConnection.containerName(record.id));
       const guest = yield* guests.prepare(record);
       const destination: ContainerDestination = {
         hostEnvironmentId: owner,
@@ -337,7 +321,7 @@ const make = Effect.gen(function* () {
         guestEnvironmentId: guest.environmentId,
         guestProjectId: guest.projectId,
         guestCheckoutPath: record.checkoutPath,
-        runtime: record.runtime,
+        provider: record.provider,
         label: `${basename(record.checkoutPath)} · ${record.image}`,
       };
       record = {
@@ -376,13 +360,13 @@ const make = Effect.gen(function* () {
         );
         if (record) {
           if (record.checkoutPath !== mounted.checkout) return yield* fail("reuse", "incompatible");
-          const runtimeStatus = yield* engine.status(record.runtime, { refresh: true });
-          if (!runtimeStatus.available) return yield* fail("runtime", "runtime-unavailable");
+          const providerStatus = yield* providers.status(record.provider, { refresh: true });
+          if (!providerStatus.available) return yield* fail("provider", "provider-unavailable");
         } else {
           if (input.selection.type !== "fresh") return yield* fail("reuse", "not-found");
-          const selectedRuntime = (yield* runtimeSettings(input.projectId)).resolved;
-          const runtimeStatus = yield* engine.status(selectedRuntime, { refresh: true });
-          if (!runtimeStatus.available) return yield* fail("runtime", "runtime-unavailable");
+          const selectedProvider = (yield* providerSettings(input.projectId)).resolved;
+          const providerStatus = yield* providers.status(selectedProvider, { refresh: true });
+          if (!providerStatus.available) return yield* fail("provider", "provider-unavailable");
           const config = yield* locks.withLock(
             `project-setup:${input.projectId}`,
             Effect.gen(function* () {
@@ -394,7 +378,7 @@ const make = Effect.gen(function* () {
             }),
           );
           const directory = join(registry.root, id);
-          const artifact = yield* runtime.stage(directory);
+          const artifact = yield* guestRuntime.stage(directory);
           const encoded = yield* encodeConfig(config).pipe(
             Effect.mapError(
               (cause) =>
@@ -419,7 +403,7 @@ const make = Effect.gen(function* () {
             directory,
             mounts: mounted.mounts,
             containerId: null,
-            runtime: selectedRuntime,
+            provider: selectedProvider,
             staleContainers: [],
             guest: null,
             lastUsedAt: yield* Clock.currentTimeMillis,
@@ -449,8 +433,8 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         let record = yield* find(input.workspaceId);
         if (record.ownership !== "managed") return yield* fail(input.action, "not-owned");
-        const runtimeStatus = yield* engine.status(record.runtime);
-        if (!runtimeStatus.available) return yield* fail(input.action, "runtime-unavailable");
+        const providerStatus = yield* providers.status(record.provider);
+        if (!providerStatus.available) return yield* fail(input.action, "provider-unavailable");
         if (
           options?.automatic &&
           ((options.ignoreLeases !== true && leases.has(record.id)) ||
@@ -464,8 +448,8 @@ const make = Effect.gen(function* () {
             yield* Deferred.succeed(lease.close, undefined);
             yield* Deferred.await(lease.drained);
           }
-          const inspected = yield* engine.inspect(
-            record.runtime,
+          const inspected = yield* providers.inspect(
+            record.provider,
             GuestConnection.containerName(record.id),
           );
           if (inspected) {
@@ -479,20 +463,12 @@ const make = Effect.gen(function* () {
               if (!(yield* guests.idle(record))) return yield* fail("idle", "busy");
               if (options?.automatic && !(yield* cleanupEligible(record, input.action, options)))
                 return asWorkspace(record);
-              yield* engine.run(record.runtime, "stop", [
-                "stop",
-                "--time",
-                "30",
-                GuestConnection.containerName(record.id),
-              ]);
+              yield* providers.stop(record.provider, GuestConnection.containerName(record.id));
             }
             if (options?.automatic && !(yield* cleanupEligible(record, input.action, options)))
               return asWorkspace(record);
             if (input.action === "remove-runtime")
-              yield* engine.run(record.runtime, "remove", [
-                "rm",
-                GuestConnection.containerName(record.id),
-              ]);
+              yield* providers.remove(record.provider, GuestConnection.containerName(record.id));
           }
           record = {
             ...record,
@@ -525,11 +501,11 @@ const make = Effect.gen(function* () {
   });
   const removeContainer = Effect.fn("ContainerWorkspaces.removeContainer")(function* (
     record: WorkspaceRecord,
-    runtime: ContainerRuntimeKind,
+    provider: ContainerProviderKind,
     containerId: string | null,
   ) {
     const name = GuestConnection.containerName(record.id);
-    const inspected = yield* engine.inspect(runtime, name);
+    const inspected = yield* providers.inspect(provider, name);
     if (!inspected) return;
     if (
       inspected.Config.Labels?.["codes.t3.owner"] !== owner ||
@@ -539,55 +515,55 @@ const make = Effect.gen(function* () {
       return yield* fail("identity", "incompatible");
     if (inspected.State.Running) {
       const idle = yield* guests.idle(record).pipe(Effect.option);
-      if (Option.isSome(idle) && idle.value === false) return yield* fail("change-runtime", "busy");
-      yield* engine.run(runtime, "stop", ["stop", "--time", "30", name]);
+      if (Option.isSome(idle) && idle.value === false)
+        return yield* fail("change-provider", "busy");
+      yield* providers.stop(provider, name);
     }
-    yield* engine.run(runtime, "remove", ["rm", name]);
+    yield* providers.remove(provider, name);
   });
-  const changeRuntime = Effect.fn("ContainerWorkspaces.changeRuntime")(function* (
-    input: ChangeContainerRuntimeInput,
+  const changeProvider = Effect.fn("ContainerWorkspaces.changeProvider")(function* (
+    input: ChangeContainerProviderInput,
   ) {
     yield* guard;
     return yield* locks.withLock(
       input.workspaceId,
       Effect.gen(function* () {
         let record = yield* find(input.workspaceId);
-        if (record.ownership !== "managed") return yield* fail("change-runtime", "not-owned");
-        if (record.runtime === input.runtime)
+        if (record.ownership !== "managed") return yield* fail("change-provider", "not-owned");
+        if (record.provider === input.provider)
           return yield* ensure(record, { preserveInstallMarker: true });
-        const targetStatus = yield* engine.status(input.runtime, { refresh: true });
-        if (!targetStatus.available) return yield* fail("change-runtime", "runtime-unavailable");
+        const targetStatus = yield* providers.status(input.provider, { refresh: true });
+        if (!targetStatus.available) return yield* fail("change-provider", "provider-unavailable");
         let staleContainers = record.staleContainers.filter(
-          (entry) => entry.runtime !== input.runtime,
+          (entry) => entry.provider !== input.provider,
         );
         const name = GuestConnection.containerName(record.id);
-        const existing = yield* engine.inspect(input.runtime, name);
+        const existing = yield* providers.inspect(input.provider, name);
         if (existing) {
           if (
             existing.Config.Labels?.["codes.t3.owner"] !== owner ||
             existing.Config.Labels["codes.t3.workspace"] !== record.id
           )
             return yield* fail("identity", "incompatible");
-          if (existing.State.Running)
-            yield* engine.run(input.runtime, "stop", ["stop", "--time", "30", name]);
-          yield* engine.run(input.runtime, "remove", ["rm", name]);
+          if (existing.State.Running) yield* providers.stop(input.provider, name);
+          yield* providers.remove(input.provider, name);
         }
-        const oldRuntime = record.runtime;
-        const oldStatus = yield* engine.status(oldRuntime, { refresh: true });
+        const oldProvider = record.provider;
+        const oldStatus = yield* providers.status(oldProvider, { refresh: true });
         if (oldStatus.available) {
-          yield* removeContainer(record, oldRuntime, record.containerId);
+          yield* removeContainer(record, oldProvider, record.containerId);
         } else if (record.containerId !== null) {
           staleContainers = [
             ...staleContainers,
-            { runtime: oldRuntime, containerId: record.containerId },
+            { provider: oldProvider, containerId: record.containerId },
           ];
         }
         record = {
           ...record,
-          runtime: input.runtime,
+          provider: input.provider,
           containerId: null,
           staleContainers,
-          status: { type: "provisioning", stage: "change-runtime" },
+          status: { type: "provisioning", stage: "change-provider" },
         };
         yield* registry.save(record);
         return yield* ensure(record, { preserveInstallMarker: true }).pipe(
@@ -608,14 +584,14 @@ const make = Effect.gen(function* () {
     const remaining: Array<WorkspaceRecord["staleContainers"][number]> = [];
     for (const entry of record.staleContainers) {
       // A stale entry naming the live runtime must not remove its current container.
-      if (entry.runtime === record.runtime) continue;
-      const status = yield* engine.status(entry.runtime);
+      if (entry.provider === record.provider) continue;
+      const status = yield* providers.status(entry.provider);
       if (!status.available) {
         remaining.push(entry);
         continue;
       }
       const name = GuestConnection.containerName(record.id);
-      const inspected = yield* engine.inspect(entry.runtime, name).pipe(Effect.result);
+      const inspected = yield* providers.inspect(entry.provider, name).pipe(Effect.result);
       if (inspected._tag === "Failure") {
         remaining.push(entry);
         continue;
@@ -627,9 +603,8 @@ const make = Effect.gen(function* () {
         inspected.success.Config.Labels["codes.t3.workspace"] !== record.id
       )
         continue;
-      if (inspected.success.State.Running)
-        yield* engine.run(entry.runtime, "stop", ["stop", "--time", "30", name]);
-      yield* engine.run(entry.runtime, "remove", ["rm", name]);
+      if (inspected.success.State.Running) yield* providers.stop(entry.provider, name);
+      yield* providers.remove(entry.provider, name);
     }
     if (remaining.length === record.staleContainers.length) return record;
     const next = { ...record, staleContainers: remaining };
@@ -642,10 +617,10 @@ const make = Effect.gen(function* () {
     const records = yield* registry.list;
     return {
       config: (yield* registry.config) ?? DEFAULT_CONTAINER_CONFIG,
-      runtime: yield* runtimeSettings(input.projectId ?? null),
-      runtimes: yield* Effect.forEach(
-        CONTAINER_RUNTIME_KINDS,
-        (runtime) => engine.status(runtime, { refresh: input.refreshRuntimes === true }),
+      provider: yield* providerSettings(input.projectId ?? null),
+      providers: yield* Effect.forEach(
+        CONTAINER_PROVIDER_KINDS,
+        (provider) => providers.status(provider, { refresh: input.refreshProviders === true }),
         { concurrency: "unbounded" },
       ),
       available: guestMode !== "1",
@@ -676,7 +651,7 @@ const make = Effect.gen(function* () {
       ),
     );
     yield* Effect.try({
-      try: () => ContainerRuntime.guestEnvironment(config),
+      try: () => GuestRuntime.guestEnvironment(config),
       catch: (cause) =>
         new ContainerError({ stage: "environment", reason: "invalid-environment", cause }),
     });
@@ -712,7 +687,7 @@ const make = Effect.gen(function* () {
         const revision = ContainerConfigurationRevision.make(yield* random.uuidV4());
         if (decoded.kind === "setup") {
           yield* Effect.try({
-            try: () => ContainerRuntime.guestEnvironment(decoded.value),
+            try: () => GuestRuntime.guestEnvironment(decoded.value),
             catch: (cause) =>
               new ContainerError({ stage: "environment", reason: "invalid-environment", cause }),
           });
@@ -858,7 +833,7 @@ const make = Effect.gen(function* () {
     act,
     wake,
     idle,
-    changeRuntime,
+    changeProvider,
     settings,
     configure,
     configureProject,

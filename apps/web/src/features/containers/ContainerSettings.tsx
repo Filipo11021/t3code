@@ -2,14 +2,14 @@ import { use, useEffect, useState } from "react";
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import {
-  CONTAINER_RUNTIME_KINDS,
+  CONTAINER_PROVIDER_KINDS,
   ContainerCleanupRules,
   ContainerOperationId,
   DEFAULT_CONTAINER_CONFIG,
   DEFAULT_CONTAINER_IDLE_MINUTES,
   CONTAINER_MAX_IDLE_MINUTES,
   CONTAINER_MAX_REMOVAL_DAYS,
-  type ContainerRuntimeKind,
+  type ContainerProviderKind,
   type ContainerSettings,
   type ContainerSetup,
   type EnvironmentId,
@@ -46,11 +46,11 @@ import { useStableCallback } from "../../hooks/useStableCallback";
 import { ContainerEnvironmentSetup } from "./ContainerEnvironmentSetup";
 import {
   containerActivityLabel,
-  containerRuntimeLabel,
-  containerRuntimeStatus,
+  containerProviderLabel,
+  containerProviderStatus,
   containerSettingsTargets,
 } from "./selection";
-import { useContainerRuntimeOverview } from "./useContainerRuntimeOverview";
+import { useContainerProviderOverview } from "./useContainerProviderOverview";
 
 const validCleanup = Schema.is(ContainerCleanupRules);
 const bounded = (value: number | null, maximum: number) =>
@@ -68,7 +68,7 @@ const toSetup = (config: ContainerSetup): ContainerSetup => ({
 const message = (cause: unknown) =>
   cause instanceof Error ? cause.message : "Container operation failed.";
 
-function ContainerRuntimeSection() {
+function ContainerProviderSection() {
   const { scope, connectedEnvironments } = useSettingsScope();
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
@@ -90,13 +90,13 @@ function ContainerRuntimeSection() {
       projectId: projectIds.length === 1 ? (projectIds[0] ?? null) : null,
     };
   });
-  const overview = useContainerRuntimeOverview({
+  const overview = useContainerProviderOverview({
     targets,
-    revisionKey: settings.containerRuntime,
+    revisionKey: settings.containerProvider,
   });
-  const statusFor = (runtime: ContainerRuntimeKind) => {
+  const statusFor = (provider: ContainerProviderKind) => {
     const statuses = [...overview.entries.values()].flatMap((entry) => {
-      const status = entry.runtimes.find((candidate) => candidate.runtime === runtime);
+      const status = entry.providers.find((candidate) => candidate.provider === provider);
       return status ? [status] : [];
     });
     if (statuses.length === 0) return null;
@@ -106,45 +106,47 @@ function ContainerRuntimeSection() {
   const unavailableLabels = environments.flatMap((environment) => {
     const entry = overview.entries.get(environment.environmentId);
     if (!entry) return [];
-    const status = entry.runtimes.find((candidate) => candidate.runtime === entry.runtime.resolved);
+    const status = entry.providers.find(
+      (candidate) => candidate.provider === entry.provider.resolved,
+    );
     return status?.available === false ? [environment.label] : [];
   });
   return (
-    <SettingsSection id="container-runtime" title="Container runtime">
+    <SettingsSection id="container-provider" title="Container provider">
       <p className="text-sm text-muted-foreground">
-        Docker and Podman are detected on the host. New containers use the selected runtime.
-        Existing containers keep their recorded runtime and idle when their guest has no running
-        work. Adjust the idle window under Container cleanup.
+        Docker and Podman are detected on the host, and Gondolin runs a micro-VM. New containers use
+        the selected provider. Existing containers keep their recorded provider and idle when their
+        guest has no running work. Adjust the idle window under Container cleanup.
       </p>
       <SettingsRow
         serverScoped
-        settingKeys={["containerRuntime"]}
-        title="Default container runtime"
-        description="New containers use this runtime here. Existing containers keep their recorded runtime."
+        settingKeys={["containerProvider"]}
+        title="Default container provider"
+        description="New containers use this provider here. Existing containers keep their recorded provider."
         resetAction={
-          settings.containerRuntime !== "docker" ? (
+          settings.containerProvider !== "docker" ? (
             <SettingResetButton
-              label="default container runtime"
-              onClick={() => updateSettings({ containerRuntime: "docker" })}
+              label="default container provider"
+              onClick={() => updateSettings({ containerProvider: "docker" })}
             />
           ) : null
         }
         control={
           <Select
-            value={settings.containerRuntime}
+            value={settings.containerProvider}
             onValueChange={(value) =>
-              updateSettings({ containerRuntime: value as ContainerRuntimeKind })
+              updateSettings({ containerProvider: value as ContainerProviderKind })
             }
           >
-            <SelectTrigger aria-label="Default container runtime">
-              <SelectValue>{containerRuntimeLabel(settings.containerRuntime)}</SelectValue>
+            <SelectTrigger aria-label="Default container provider">
+              <SelectValue>{containerProviderLabel(settings.containerProvider)}</SelectValue>
             </SelectTrigger>
             <SelectPopup>
-              {CONTAINER_RUNTIME_KINDS.map((runtime) => {
-                const status = statusFor(runtime);
+              {CONTAINER_PROVIDER_KINDS.map((provider) => {
+                const status = statusFor(provider);
                 return (
-                  <SelectItem key={runtime} value={runtime}>
-                    {containerRuntimeLabel(runtime)}
+                  <SelectItem key={provider} value={provider}>
+                    {containerProviderLabel(provider)}
                     {status ? ` · ${status}` : ""}
                   </SelectItem>
                 );
@@ -156,14 +158,14 @@ function ContainerRuntimeSection() {
       {unavailableLabels.length > 0 ? (
         <p role="alert" className="text-sm text-destructive">
           {unavailableLabels.join(", ")} {unavailableLabels.length === 1 ? "does" : "do"} not have
-          the selected runtime available. Start it or choose an available runtime. Existing
-          containers keep their recorded runtime.
+          the selected container provider available. Start it or choose an available provider.
+          Existing containers keep their recorded provider.
         </p>
       ) : null}
       <div className="space-y-4">
         {environments.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            Connect an environment to check Docker and Podman.
+            Connect an environment to check Docker, Podman and Gondolin.
           </p>
         ) : null}
         {environments.map((environment) => {
@@ -187,17 +189,19 @@ function ContainerRuntimeSection() {
                   {error}
                 </p>
               ) : null}
-              <div className="grid gap-2 sm:grid-cols-2">
-                {CONTAINER_RUNTIME_KINDS.map((runtime) => {
-                  const status = entry?.runtimes.find((candidate) => candidate.runtime === runtime);
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {CONTAINER_PROVIDER_KINDS.map((provider) => {
+                  const status = entry?.providers.find(
+                    (candidate) => candidate.provider === provider,
+                  );
                   const count =
-                    entry?.workspaces.filter((workspace) => workspace.runtime === runtime).length ??
-                    0;
+                    entry?.workspaces.filter((workspace) => workspace.provider === provider)
+                      .length ?? 0;
                   return (
-                    <div key={runtime} className="space-y-1 rounded-md border p-3">
+                    <div key={provider} className="space-y-1 rounded-md border p-3">
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-sm font-medium">
-                          {containerRuntimeLabel(runtime)}
+                          {containerProviderLabel(provider)}
                         </span>
                         {status ? (
                           <Badge size="sm" variant={status.available ? "success" : "warning"}>
@@ -248,7 +252,7 @@ function ContainerSettingsForTarget({
   const [data, setData] = useState<ContainerSettings | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const load = useStableCallback(async (signal?: AbortSignal, refreshRuntimes = false) => {
+  const load = useStableCallback(async (signal?: AbortSignal, refreshStatuses = false) => {
     const result = await runAtomCommand(
       registry,
       serverEnvironment.containers.settings,
@@ -256,7 +260,7 @@ function ContainerSettingsForTarget({
         environmentId,
         input: {
           ...(projectId ? { projectId } : {}),
-          ...(refreshRuntimes ? { refreshRuntimes: true } : {}),
+          ...(refreshStatuses ? { refreshProviders: true } : {}),
         },
       },
       { reportFailure: false },
@@ -275,13 +279,13 @@ function ContainerSettingsForTarget({
     });
     return () => abort.abort();
   }, [load]);
-  const perform = async (work: () => Promise<void>, refreshRuntimes = false) => {
+  const perform = async (work: () => Promise<void>, refreshStatuses = false) => {
     if (pending) return;
     setPending(true);
     setError(null);
     try {
       await work();
-      await load(undefined, refreshRuntimes);
+      await load(undefined, refreshStatuses);
     } catch (cause) {
       setError(message(cause));
     }
@@ -409,7 +413,7 @@ function ContainerSettingsForTarget({
           <div className="space-y-2">
             <SettingsRow
               title="Container cleanup"
-              description="Only managed runtimes are stopped or removed. Source files, guest home, credentials and history stay. Unknown or busy guests are retained."
+              description="Only managed containers are stopped or removed. Source files, guest home, credentials and history stay. Unknown or busy guests are retained."
               control={
                 projectId ? (
                   <Select
@@ -456,8 +460,8 @@ function ContainerSettingsForTarget({
             />
             {!validCleanup(rules) ? (
               <p className="text-sm text-muted-foreground">
-                Legacy cleanup is outside supported limits. Automatic cleanup retains runtimes until
-                corrected.
+                Legacy cleanup is outside supported limits. Automatic cleanup retains containers
+                until corrected.
               </p>
             ) : null}
             <SettingsRow
@@ -483,11 +487,11 @@ function ContainerSettingsForTarget({
               }
             />
             <SettingsRow
-              title="Remove runtime after inactivity"
-              description="Reopen recreates the runtime using its retained setup and home. It does not delete a checkout or thread."
+              title="Remove container after inactivity"
+              description="Reopen recreates the container using its retained setup and home. It does not delete a checkout or thread."
               control={
                 <RetentionControl
-                  label="Container runtime retention"
+                  label="Container retention"
                   value={rules.removeAfterDays}
                   maximum={CONTAINER_MAX_REMOVAL_DAYS}
                   disabled={disabled || Boolean(projectId && policy.kind !== "custom")}
@@ -529,26 +533,26 @@ function ContainerSettingsForTarget({
               </p>
             ) : null}
             {data.workspaces.map((workspace) => {
-              const currentRuntime = containerRuntimeLabel(workspace.runtime);
-              const runtimeUnavailable =
-                containerRuntimeStatus(data, workspace.runtime)?.available === false;
-              const otherRuntime = CONTAINER_RUNTIME_KINDS.find(
-                (runtime) => runtime !== workspace.runtime,
+              const currentProvider = containerProviderLabel(workspace.provider);
+              const providerUnavailable =
+                containerProviderStatus(data, workspace.provider)?.available === false;
+              const otherProvider = CONTAINER_PROVIDER_KINDS.find(
+                (provider) => provider !== workspace.provider,
               );
-              const otherRuntimeAvailable = data.runtimes.some(
-                (status) => status.runtime !== workspace.runtime && status.available,
+              const otherProviderAvailable = data.providers.some(
+                (status) => status.provider !== workspace.provider && status.available,
               );
               return (
                 <div key={workspace.id} className="space-y-2 rounded-md border p-3">
                   <p className="break-all text-sm">{workspace.checkoutPath}</p>
                   <p className="text-xs text-muted-foreground">
-                    {workspace.image} · {currentRuntime} ·{" "}
+                    {workspace.image} · {currentProvider} ·{" "}
                     {containerActivityLabel(workspace.status)}
                   </p>
-                  {runtimeUnavailable ? (
+                  {providerUnavailable ? (
                     <p role="alert" className="text-sm text-destructive">
-                      {currentRuntime} is unavailable. Change this container to an available runtime
-                      to continue.
+                      {currentProvider} is unavailable. Change this container to an available
+                      provider to continue.
                     </p>
                   ) : null}
                   {workspace.status.type === "failed" ? (
@@ -557,32 +561,32 @@ function ContainerSettingsForTarget({
                     </p>
                   ) : null}
                   <SettingsRow
-                    title="Runtime"
-                    description="Changing runtime recreates the container. Guest home, checkout, installs and threads stay."
+                    title="Provider"
+                    description="Changing provider recreates the container. Guest home, checkout, installs and threads stay."
                     control={
                       <Select
-                        value={workspace.runtime}
+                        value={workspace.provider}
                         disabled={
-                          disabled || workspace.ownership !== "managed" || !otherRuntimeAvailable
+                          disabled || workspace.ownership !== "managed" || !otherProviderAvailable
                         }
                         onValueChange={(value) => {
-                          const runtime = value as ContainerRuntimeKind;
-                          if (runtime === workspace.runtime) return;
+                          const provider = value as ContainerProviderKind;
+                          if (provider === workspace.provider) return;
                           void (async () => {
-                            const label = containerRuntimeLabel(runtime);
+                            const label = containerProviderLabel(provider);
                             if (
                               !(await ensureLocalApi().dialogs.confirm(
-                                `Switch this container to ${label}? The guest home, checkout, installs and threads stay, but the runtime restarts on ${label}.`,
+                                `Switch this container to ${label}? The guest home, checkout, installs and threads stay, but the container restarts with ${label}.`,
                               ))
                             )
                               return;
                             await perform(async () => {
                               const result = await runAtomCommand(
                                 registry,
-                                serverEnvironment.containers.changeRuntime,
+                                serverEnvironment.containers.changeProvider,
                                 {
                                   environmentId,
-                                  input: { workspaceId: workspace.id, runtime },
+                                  input: { workspaceId: workspace.id, provider },
                                 },
                                 { reportFailure: false },
                               );
@@ -591,37 +595,38 @@ function ContainerSettingsForTarget({
                           })();
                         }}
                       >
-                        <SelectTrigger aria-label="Container runtime">
-                          <SelectValue>{currentRuntime}</SelectValue>
+                        <SelectTrigger aria-label="Container provider">
+                          <SelectValue>{currentProvider}</SelectValue>
                         </SelectTrigger>
                         <SelectPopup>
-                          <SelectItem value={workspace.runtime} disabled>
-                            {currentRuntime} · current
+                          <SelectItem value={workspace.provider} disabled>
+                            {currentProvider} · current
                           </SelectItem>
-                          {data.runtimes
+                          {data.providers
                             .filter(
-                              (status) => status.runtime !== workspace.runtime && status.available,
+                              (status) =>
+                                status.provider !== workspace.provider && status.available,
                             )
                             .map((status) => (
-                              <SelectItem key={status.runtime} value={status.runtime}>
-                                {containerRuntimeLabel(status.runtime)}
+                              <SelectItem key={status.provider} value={status.provider}>
+                                {containerProviderLabel(status.provider)}
                               </SelectItem>
                             ))}
                         </SelectPopup>
                       </Select>
                     }
                   />
-                  {!otherRuntimeAvailable && otherRuntime ? (
+                  {!otherProviderAvailable && otherProvider ? (
                     <p className="text-xs text-muted-foreground">
-                      Start {currentRuntime} or install {containerRuntimeLabel(otherRuntime)} to
-                      change runtime.
+                      Start {currentProvider} or make another container provider available to change
+                      provider.
                     </p>
                   ) : null}
                   <div className="flex flex-wrap gap-2">
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={disabled || runtimeUnavailable}
+                      disabled={disabled || providerUnavailable}
                       onClick={() =>
                         void perform(async () => {
                           const opened = await runAtomCommand(
@@ -662,14 +667,14 @@ function ContainerSettingsForTarget({
                         size="sm"
                         variant={action === "remove-runtime" ? "destructive" : "outline"}
                         disabled={
-                          disabled || runtimeUnavailable || workspace.ownership !== "managed"
+                          disabled || providerUnavailable || workspace.ownership !== "managed"
                         }
                         onClick={() =>
                           void perform(async () => {
                             if (
                               action === "remove-runtime" &&
                               !(await ensureLocalApi().dialogs.confirm(
-                                "Remove this runtime? Guest home, history and checkout files are retained.",
+                                "Remove this instance? Guest home, history and checkout files are retained.",
                                 { variant: "destructive" },
                               ))
                             )
@@ -685,7 +690,7 @@ function ContainerSettingsForTarget({
                         }
                       >
                         {action === "remove-runtime"
-                          ? "Remove runtime"
+                          ? "Remove instance"
                           : action === "restart"
                             ? "Restart"
                             : "Stop"}
@@ -711,7 +716,7 @@ export function ContainerSettingsPanel() {
   const targets = containerSettingsTargets(scope);
   return (
     <SettingsPageContainer>
-      <ContainerRuntimeSection />
+      <ContainerProviderSection />
       <SettingsSection id="container-setup" title="Container environments">
         <p className="text-sm text-muted-foreground">
           Setup belongs to each environment-local project. Checkout scope edits its owning project.

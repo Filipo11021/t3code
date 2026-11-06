@@ -8,7 +8,9 @@ import * as ContainerSubmissions from "./containers/ContainerSubmissions.ts";
 import * as CommandReceiptStore from "./orchestration-v2/CommandReceiptStore.ts";
 import * as EventStore from "./orchestration-v2/EventStore.ts";
 import * as ContainerEngine from "./containers/engine.ts";
-import * as ContainerRuntime from "./containers/bootstrap.ts";
+import * as ContainerProviders from "./containers/providers.ts";
+import * as GondolinEngine from "./containers/gondolin.ts";
+import * as GuestRuntime from "./containers/bootstrap.ts";
 import * as ContainerRegistry from "./containers/registry.ts";
 import * as ContainerGuest from "./containers/GuestService.ts";
 import * as ContainerGateway from "./containers/gateway.ts";
@@ -800,8 +802,8 @@ const layerMakeRoutes = Layer.mergeAll(
   Layer.provideMerge(
     ContainerWorkspaces.layer.pipe(
       Layer.provide(ContainerRegistry.layer),
-      Layer.provide(ContainerRuntime.layer),
-      Layer.provide(GuestConnection.layer.pipe(Layer.provideMerge(ContainerEngine.layer))),
+      Layer.provide(GuestRuntime.layer),
+      Layer.provide(GuestConnection.layer),
     ),
   ),
   Layer.provideMerge(
@@ -811,7 +813,7 @@ const layerMakeRoutes = Layer.mergeAll(
       ),
     ),
   ),
-  Layer.provideMerge(GuestConnection.layer.pipe(Layer.provide(ContainerEngine.layer))),
+  Layer.provideMerge(GuestConnection.layer),
   Layer.provide(ContainerGuest.layer),
   Layer.provide(RuntimeLayer.layerProjectService),
   Layer.provide(ProjectionStoreV2.layer),
@@ -843,6 +845,12 @@ const layerMakeRoutes = Layer.mergeAll(
   Layer.provide(layerCommandReadiness),
   Layer.provide(ServerHttp.layerBrowserApiCors),
   Layer.provide(ServerHttp.layerHttpCompression),
+  Layer.provide(
+    ContainerProviders.layer.pipe(
+      Layer.provide(ContainerEngine.layer),
+      Layer.provide(GondolinEngine.layer),
+    ),
+  ),
 );
 
 const layerMakeServer = Layer.unwrap(

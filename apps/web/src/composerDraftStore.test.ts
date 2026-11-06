@@ -1091,7 +1091,7 @@ describe("composerDraftStore project draft thread mapping", () => {
           guestEnvironmentId: EnvironmentId.make("guest"),
           guestProjectId: ProjectId.make("guest-project"),
           guestCheckoutPath: "/project",
-          runtime: "docker",
+          provider: "docker",
           label: "Guest",
         },
         request: {
