@@ -64,7 +64,7 @@ export function bootstrapScript(input: {
     `getent group ${input.gid} >/dev/null || groupadd -g ${input.gid} t3`,
     `id t3 >/dev/null 2>&1 || useradd -M -u ${input.uid} -g ${input.gid} -d ${GUEST_HOME} -s /bin/bash t3`,
     `usermod -d ${GUEST_HOME} -g ${input.gid} -s /bin/bash t3`,
-    `chown ${input.uid}:${input.gid} ${GUEST_HOME} 2>/dev/null || true`,
+    `chown ${input.uid}:${input.gid} ${GUEST_HOME}`,
     `cd ${quote(input.checkout)}`,
     userCommand("git config --global --add safe.directory " + quote(input.checkout)),
     `if [ ! -f ${GUEST_HOME}/.installed-${input.revision} ]; then`,
@@ -77,14 +77,14 @@ export function bootstrapScript(input: {
   ].join("\n");
 }
 
-export class GuestRuntime extends Context.Service<
-  GuestRuntime,
+export class ContainerRuntime extends Context.Service<
+  ContainerRuntime,
   {
     readonly stage: (
       directory: string,
     ) => Effect.Effect<{ readonly path: string; readonly revision: string }, ContainerError>;
   }
->()("t3/containers/bootstrap/GuestRuntime") {}
+>()("t3/containers/bootstrap/ContainerRuntime") {}
 
 const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
@@ -95,7 +95,7 @@ const make = Effect.gen(function* () {
   const platform = yield* HostProcess.Platform;
   const arch = yield* HostProcess.Architecture;
   const override = yield* Config.String("T3CODE_CONTAINER_RUNTIME").pipe(Config.option);
-  const stage = Effect.fn("GuestRuntime.stage")(function* (directory: string) {
+  const stage = Effect.fn("ContainerRuntime.stage")(function* (directory: string) {
     let source = Option.getOrElse(override, () => dirname(process.execPath));
     const result = yield* Effect.gen(function* () {
       yield* fs.makeDirectory(directory, { recursive: true });
@@ -104,7 +104,7 @@ const make = Effect.gen(function* () {
         (platform !== "linux" || !(yield* fs.exists(join(source, "t3-runtime.json"))))
       ) {
         if (telemetryChannel === "dev" || !["x64", "arm64"].includes(arch))
-          return yield* new ContainerError({ stage: "runtime", reason: "guest-runtime-required" });
+          return yield* new ContainerError({ stage: "runtime", reason: "runtime-required" });
         const archive = join(directory, `t3-${packageJson.version}-linux-${arch}.tar.gz`);
         yield* Effect.scoped(
           Effect.gen(function* () {
@@ -116,7 +116,7 @@ const make = Effect.gen(function* () {
             if (response.status !== 200)
               return yield* new ContainerError({
                 stage: "runtime-download",
-                reason: "guest-runtime-required",
+                reason: "runtime-required",
               });
             yield* response.stream.pipe(Stream.run(fs.sink(archive, { mode: 0o600 })));
           }),
@@ -146,10 +146,7 @@ const make = Effect.gen(function* () {
             args: ["-xzf", source, "--strip-components=1", "-C", temporary],
           });
           if (extracted.code !== 0)
-            return yield* new ContainerError({
-              stage: "runtime",
-              reason: "guest-runtime-required",
-            });
+            return yield* new ContainerError({ stage: "runtime", reason: "runtime-required" });
         }
         for (const item of [
           "t3",
@@ -158,10 +155,7 @@ const make = Effect.gen(function* () {
           "node_modules/node-pty/package.json",
         ]) {
           if (!(yield* fs.exists(join(temporary, item))))
-            return yield* new ContainerError({
-              stage: "runtime",
-              reason: "guest-runtime-required",
-            });
+            return yield* new ContainerError({ stage: "runtime", reason: "runtime-required" });
         }
         yield* fs.chmod(join(temporary, "t3"), 0o755);
         const manifest = yield* decodeManifest(
@@ -178,7 +172,7 @@ const make = Effect.gen(function* () {
         ) {
           return yield* new ContainerError({
             stage: "runtime-version",
-            reason: "guest-runtime-required",
+            reason: "runtime-required",
           });
         }
         yield* fs.rename(temporary, target);
@@ -192,11 +186,11 @@ const make = Effect.gen(function* () {
       Effect.mapError((cause) =>
         isContainerError(cause)
           ? cause
-          : new ContainerError({ stage: "runtime", reason: "guest-runtime-required", cause }),
+          : new ContainerError({ stage: "runtime", reason: "runtime-required", cause }),
       ),
     );
     return result;
   });
-  return GuestRuntime.of({ stage });
+  return ContainerRuntime.of({ stage });
 });
-export const layer = Layer.effect(GuestRuntime, make);
+export const layer = Layer.effect(ContainerRuntime, make);

@@ -1,8 +1,8 @@
 import {
-  CONTAINER_PROVIDER_LABELS,
+  CONTAINER_RUNTIME_LABELS,
   ContainerError,
-  type ContainerProviderKind,
-  type ContainerProviderStatus,
+  type ContainerRuntimeKind,
+  type ContainerRuntimeStatus,
 } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -11,8 +11,6 @@ import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as ProcessRunner from "../processRunner.ts";
-import type { ContainerCreateInput, ContainerExecOptions } from "./providerTypes.ts";
-import { GUEST_HOME, GUEST_PORT, GUEST_RUNTIME } from "./bootstrap.ts";
 
 const Inspection = Schema.Struct({
   Id: Schema.String,
@@ -55,48 +53,34 @@ const lastLine = (value: string) =>
 export class ContainerEngine extends Context.Service<
   ContainerEngine,
   {
-    readonly status: (
-      provider: ContainerProviderKind,
-      options?: { readonly refresh?: boolean },
-    ) => Effect.Effect<ContainerProviderStatus>;
+    readonly run: (
+      runtime: ContainerRuntimeKind,
+      stage: string,
+      args: ReadonlyArray<string>,
+    ) => Effect.Effect<string, ContainerError>;
     readonly inspect: (
-      provider: ContainerProviderKind,
+      runtime: ContainerRuntimeKind,
       name: string,
     ) => Effect.Effect<Inspection | null, ContainerError>;
-    readonly create: (input: ContainerCreateInput) => Effect.Effect<string, ContainerError>;
-    readonly start: (
-      provider: ContainerProviderKind,
-      name: string,
-    ) => Effect.Effect<void, ContainerError>;
-    readonly stop: (
-      provider: ContainerProviderKind,
-      name: string,
-    ) => Effect.Effect<void, ContainerError>;
-    readonly remove: (
-      provider: ContainerProviderKind,
-      name: string,
-    ) => Effect.Effect<void, ContainerError>;
-    readonly exec: (
-      provider: ContainerProviderKind,
-      name: string,
-      command: ReadonlyArray<string>,
-      options?: ContainerExecOptions,
-    ) => Effect.Effect<string, ContainerError>;
+    readonly status: (
+      runtime: ContainerRuntimeKind,
+      options?: { readonly refresh?: boolean },
+    ) => Effect.Effect<ContainerRuntimeStatus>;
   }
 >()("t3/containers/engine/ContainerEngine") {}
 
 const make = Effect.gen(function* () {
   const runner = yield* ProcessRunner.ProcessRunner;
-  const cache = yield* Ref.make(new Map<ContainerProviderKind, ContainerProviderStatus>());
+  const cache = yield* Ref.make(new Map<ContainerRuntimeKind, ContainerRuntimeStatus>());
   const execute = Effect.fn("ContainerEngine.execute")(function* (
-    provider: ContainerProviderKind,
+    runtime: ContainerRuntimeKind,
     stage: string,
     args: ReadonlyArray<string>,
     timeout = "20 minutes",
   ) {
     return yield* runner
       .run({
-        command: provider,
+        command: runtime,
         args,
         timeout,
         maxOutputBytes: 512 * 1024,
@@ -107,21 +91,21 @@ const make = Effect.gen(function* () {
       );
   });
   const run = Effect.fn("ContainerEngine.run")(function* (
-    provider: ContainerProviderKind,
+    runtime: ContainerRuntimeKind,
     stage: string,
     args: ReadonlyArray<string>,
   ) {
-    const result = yield* execute(provider, stage, args);
+    const result = yield* execute(runtime, stage, args);
     if (result.code !== 0) return yield* new ContainerError({ stage, reason: "engine-failed" });
     return result.stdout.trim();
   });
   const inspect = Effect.fn("ContainerEngine.inspect")(function* (
-    provider: ContainerProviderKind,
+    runtime: ContainerRuntimeKind,
     name: string,
   ) {
-    const result = yield* execute(provider, "inspect", ["container", "inspect", name]);
+    const result = yield* execute(runtime, "inspect", ["container", "inspect", name]);
     if (result.code !== 0) {
-      yield* run(provider, "engine", ["info"]);
+      yield* run(runtime, "engine", ["info"]);
       return null;
     }
     const values = yield* decodeInspections(result.stdout).pipe(
@@ -131,82 +115,17 @@ const make = Effect.gen(function* () {
     );
     return values[0] ?? null;
   });
-  const create = Effect.fn("ContainerEngine.create")(function* (input: ContainerCreateInput) {
-    const mounts = [
-      ...input.mounts,
-      { source: input.homePath, target: GUEST_HOME },
-      { source: input.runtimePath, target: GUEST_RUNTIME },
-      { source: input.scriptPath, target: "/t3-bootstrap.sh" },
-    ];
-    return yield* run(input.provider, "create", [
-      "create",
-      "--name",
-      input.name,
-      "--init",
-      "--label",
-      `codes.t3.owner=${input.ownerEnvironmentId}`,
-      "--label",
-      `codes.t3.workspace=${input.workspaceId}`,
-      "--label",
-      `codes.t3.operation=${input.operationId}`,
-      "--label",
-      `codes.t3.revision=${input.revision}`,
-      "--publish",
-      `127.0.0.1::${GUEST_PORT}`,
-      ...mounts.flatMap((mount) => [
-        "--mount",
-        `type=bind,source=${mount.source},target=${mount.target}${("readonly" in mount && mount.readonly) || mount.target === GUEST_RUNTIME || mount.target === "/t3-bootstrap.sh" ? ",readonly" : ""}`,
-      ]),
-      "--workdir",
-      input.checkoutPath,
-      input.image,
-      "/bin/bash",
-      "/t3-bootstrap.sh",
-    ]);
-  });
-  const start = Effect.fn("ContainerEngine.start")(function* (
-    provider: ContainerProviderKind,
-    name: string,
-  ) {
-    yield* run(provider, "start", ["start", name]);
-  });
-  const stop = Effect.fn("ContainerEngine.stop")(function* (
-    provider: ContainerProviderKind,
-    name: string,
-  ) {
-    yield* run(provider, "stop", ["stop", "--time", "30", name]);
-  });
-  const remove = Effect.fn("ContainerEngine.remove")(function* (
-    provider: ContainerProviderKind,
-    name: string,
-  ) {
-    yield* run(provider, "remove", ["rm", name]);
-  });
-  const exec = Effect.fn("ContainerEngine.exec")(function* (
-    provider: ContainerProviderKind,
-    name: string,
-    command: ReadonlyArray<string>,
-    options?: ContainerExecOptions,
-  ) {
-    return yield* run(provider, "exec", [
-      "exec",
-      ...(options?.user ? ["--user", options.user] : []),
-      ...Object.entries(options?.env ?? {}).flatMap(([key, value]) => ["--env", `${key}=${value}`]),
-      name,
-      ...command,
-    ]);
-  });
   const status = Effect.fn("ContainerEngine.status")(function* (
-    provider: ContainerProviderKind,
+    runtime: ContainerRuntimeKind,
     options?: { readonly refresh?: boolean },
   ) {
     const now = yield* Clock.currentTimeMillis;
-    const cached = (yield* Ref.get(cache)).get(provider);
+    const cached = (yield* Ref.get(cache)).get(runtime);
     if (!options?.refresh && cached && now - cached.checkedAt < STATUS_CACHE_MILLIS) return cached;
-    const version = yield* execute(provider, "status", ["--version"], PROBE_TIMEOUT).pipe(
+    const version = yield* execute(runtime, "status", ["--version"], PROBE_TIMEOUT).pipe(
       Effect.result,
     );
-    const info = yield* execute(provider, "status", ["info"], PROBE_TIMEOUT).pipe(Effect.result);
+    const info = yield* execute(runtime, "status", ["info"], PROBE_TIMEOUT).pipe(Effect.result);
     const versionLine =
       version._tag === "Success" && version.success.code === 0
         ? firstLine(version.success.stdout)
@@ -216,56 +135,21 @@ const make = Effect.gen(function* () {
       version.success.code === 0 &&
       info._tag === "Success" &&
       info.success.code === 0;
-    const label = CONTAINER_PROVIDER_LABELS[provider];
-    const cliAvailable = version._tag === "Success" && version.success.code === 0;
-    const daemonAvailable = info._tag === "Success" && info.success.code === 0;
-    const requirements = [
-      {
-        id: "cli",
-        label: `${label} CLI`,
-        required: true,
-        available: cliAvailable,
-        detail: cliAvailable
-          ? null
-          : version._tag === "Success"
-            ? lastLine(version.success.stderr)
-            : null,
-      },
-      {
-        id: "daemon",
-        label: `${label} ${provider === "docker" ? "daemon" : "service"}`,
-        required: true,
-        available: daemonAvailable,
-        detail: daemonAvailable
-          ? null
-          : ((info._tag === "Success" ? lastLine(info.success.stderr) : null) ??
-            `Start ${label} and try again.`),
-      },
-    ];
     const detail = available
       ? null
       : ((info._tag === "Success" ? lastLine(info.success.stderr) : null) ??
         (version._tag === "Success" ? lastLine(version.success.stderr) : null) ??
-        `${label} is not installed or is not responding.`);
-    const result: ContainerProviderStatus = {
-      provider,
+        `${CONTAINER_RUNTIME_LABELS[runtime]} is not installed or is not responding.`);
+    const result: ContainerRuntimeStatus = {
+      runtime,
       available,
       version: versionLine,
       detail,
-      requirements,
       checkedAt: now,
     };
-    yield* Ref.update(cache, (entries) => new Map(entries).set(provider, result));
+    yield* Ref.update(cache, (entries) => new Map(entries).set(runtime, result));
     return result;
   });
-  return ContainerEngine.of({
-    inspect,
-    create,
-    start,
-    stop,
-    remove,
-    exec,
-    status,
-  });
+  return ContainerEngine.of({ run, inspect, status });
 });
 export const layer = Layer.effect(ContainerEngine, make);

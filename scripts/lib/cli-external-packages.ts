@@ -3,22 +3,6 @@
 const CLI_RUNTIME_EXTERNAL_PREFIXES = [
   // Cursor ships computed Webpack imports and platform helper packages.
   "@cursor/sdk",
-  // Gondolin reads its package assets and spawns QEMU from disk.
-  "@earendil-works/gondolin",
-  "cbor2",
-  "@cto.af/",
-  "ssh2",
-  "asn1",
-  "asn1js",
-  "pvtsutils",
-  "pvutils",
-  "tslib",
-  "bcrypt-pbkdf",
-  "cpu-features",
-  "nan",
-  "safer-buffer",
-  "tweetnacl",
-  "buildcheck",
   // Playwright reads package.json and browsers.json beside its runtime modules.
   "playwright-core",
   "node-pty",

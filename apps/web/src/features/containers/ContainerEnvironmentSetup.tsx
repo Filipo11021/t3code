@@ -54,7 +54,7 @@ export function ContainerEnvironmentSetup({
           disabled={disabled}
         />
         <span className="text-xs text-muted-foreground">
-          Runs once after success. Recreating a removed container installs again; retries may repeat
+          Runs once after success. Recreating a removed runtime installs again; retries may repeat
           partial work.
         </span>
       </label>

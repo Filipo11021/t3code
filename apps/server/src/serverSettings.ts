@@ -387,35 +387,6 @@ const LegacyProviderSettingsJson = fromLenientJson(
   }),
 );
 const decodeLegacyProviderSettingsJsonExit = Schema.decodeUnknownExit(LegacyProviderSettingsJson);
-const migrateLegacyContainerProvider = (value: unknown) => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
-  const record = { ...(value as Record<string, unknown>) };
-  if (record.containerProvider === undefined && typeof record.containerRuntime === "string") {
-    record.containerProvider = record.containerRuntime;
-  }
-  delete record.containerRuntime;
-  if (
-    typeof record.projectSettingsOverrides === "object" &&
-    record.projectSettingsOverrides !== null &&
-    !Array.isArray(record.projectSettingsOverrides)
-  ) {
-    const overrides = { ...(record.projectSettingsOverrides as Record<string, unknown>) };
-    for (const [projectId, entry] of Object.entries(overrides)) {
-      if (typeof entry !== "object" || entry === null || Array.isArray(entry)) continue;
-      const override = { ...(entry as Record<string, unknown>) };
-      if (
-        override.containerProvider === undefined &&
-        typeof override.containerRuntime === "string"
-      ) {
-        override.containerProvider = override.containerRuntime;
-      }
-      delete override.containerRuntime;
-      overrides[projectId] = override;
-    }
-    record.projectSettingsOverrides = overrides;
-  }
-  return record;
-};
 
 const LEGACY_BITBUCKET_SECRET_NAMES: Readonly<Record<string, string>> = {
   accessToken: "bitbucket-access-token",
@@ -822,9 +793,7 @@ const make = Effect.gen(function* () {
       const parsed = decodeSettingsFileJsonExit(raw);
       const decoded = Exit.isFailure(parsed)
         ? parsed
-        : decodePersistedServerSettingsExit(
-            managed.withDefaults(migrateLegacyContainerProvider(parsed.value)),
-          );
+        : decodePersistedServerSettingsExit(managed.withDefaults(parsed.value));
       const legacySettings = decodeLegacyProviderSettingsJsonExit(raw);
       if (legacySettings._tag === "Success") {
         legacyProviders = legacySettings.value.providers;

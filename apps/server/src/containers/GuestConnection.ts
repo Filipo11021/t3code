@@ -16,7 +16,7 @@ import * as Scope from "effect/Scope";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import * as SessionStore from "../auth/SessionStore.ts";
 import { HttpClient, HttpClientRequest } from "effect/http";
-import * as ContainerProviders from "./providers.ts";
+import * as ContainerEngine from "./engine.ts";
 import { GUEST_HOME, GUEST_PORT, GUEST_RUNTIME } from "./bootstrap.ts";
 import type { WorkspaceRecord } from "./registry.ts";
 
@@ -49,7 +49,7 @@ export class GuestConnection extends Context.Service<
 export const containerName = (id: ContainerWorkspaceId) => `t3-workspace-${id}`;
 
 const make = Effect.gen(function* () {
-  const providers = yield* ContainerProviders.ContainerProviders;
+  const engine = yield* ContainerEngine.ContainerEngine;
   const http = yield* HttpClient.HttpClient;
   const sessions = yield* SessionStore.SessionStore;
   const locks = yield* KeyedLock.make<string>();
@@ -60,10 +60,10 @@ const make = Effect.gen(function* () {
   const watched = new Set<string>();
   const serviceScope = yield* Scope.Scope;
   const origin = Effect.fn("GuestConnection.origin")(function* (record: WorkspaceRecord) {
-    const providerStatus = yield* providers.status(record.provider);
-    if (!providerStatus.available)
-      return yield* new ContainerError({ stage: "provider", reason: "provider-unavailable" });
-    const inspected = yield* providers.inspect(record.provider, containerName(record.id));
+    const runtimeStatus = yield* engine.status(record.runtime);
+    if (!runtimeStatus.available)
+      return yield* new ContainerError({ stage: "runtime", reason: "runtime-unavailable" });
+    const inspected = yield* engine.inspect(record.runtime, containerName(record.id));
     const labels = inspected?.Config.Labels;
     if (
       !inspected ||
@@ -103,25 +103,26 @@ const make = Effect.gen(function* () {
         )
           return cached.token;
         for (const [id, entry] of credentials) if (entry.expiresAt <= now) credentials.delete(id);
-        const json = yield* providers.exec(
-          record.provider,
+        const json = yield* engine.run(record.runtime, "guest-session", [
+          "exec",
+          "--user",
+          "t3",
+          "--env",
+          `HOME=${GUEST_HOME}`,
           containerName(record.id),
-          [
-            `${GUEST_RUNTIME}/t3`,
-            "auth",
-            "session",
-            "issue",
-            "--base-dir",
-            `${GUEST_HOME}/.t3`,
-            "--ttl",
-            `${input.seconds} seconds`,
-            "--subject",
-            input.subject,
-            ...CONTAINER_GUEST_SCOPES.flatMap((scope) => ["--scope", scope]),
-            "--json",
-          ],
-          { user: "t3", env: { HOME: GUEST_HOME } },
-        );
+          `${GUEST_RUNTIME}/t3`,
+          "auth",
+          "session",
+          "issue",
+          "--base-dir",
+          `${GUEST_HOME}/.t3`,
+          "--ttl",
+          `${input.seconds} seconds`,
+          "--subject",
+          input.subject,
+          ...CONTAINER_GUEST_SCOPES.flatMap((scope) => ["--scope", scope]),
+          "--json",
+        ]);
         const issued = yield* decodeSession(json).pipe(
           Effect.mapError(
             () => new ContainerError({ stage: "guest-session", reason: "guest-failed" }),
@@ -145,20 +146,21 @@ const make = Effect.gen(function* () {
                   credentials.delete(key);
                   watched.delete(key);
                   if (!current) return;
-                  yield* providers.exec(
-                    record.provider,
+                  yield* engine.run(record.runtime, "guest-session-revoke", [
+                    "exec",
+                    "--user",
+                    "t3",
+                    "--env",
+                    `HOME=${GUEST_HOME}`,
                     containerName(record.id),
-                    [
-                      `${GUEST_RUNTIME}/t3`,
-                      "auth",
-                      "session",
-                      "revoke",
-                      "--base-dir",
-                      `${GUEST_HOME}/.t3`,
-                      current.sessionId,
-                    ],
-                    { user: "t3", env: { HOME: GUEST_HOME } },
-                  );
+                    `${GUEST_RUNTIME}/t3`,
+                    "auth",
+                    "session",
+                    "revoke",
+                    "--base-dir",
+                    `${GUEST_HOME}/.t3`,
+                    current.sessionId,
+                  ]);
                 }),
               ),
               Effect.ignore,

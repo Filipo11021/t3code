@@ -1,7 +1,7 @@
 import { use, useEffect, useState } from "react";
 import { RegistryContext } from "@effect/atom-react";
 import type {
-  ContainerProviderStatus,
+  ContainerRuntimeStatus,
   ContainerSettings,
   ContainerWorkspace,
   EnvironmentId,
@@ -11,18 +11,18 @@ import { runAtomCommand, squashAtomCommandFailure } from "@t3tools/client-runtim
 import { serverEnvironment } from "../../state/server";
 import { useStableCallback } from "../../hooks/useStableCallback";
 
-export interface ContainerProviderOverviewTarget {
+export interface ContainerRuntimeOverviewTarget {
   readonly environmentId: EnvironmentId;
   readonly projectId: ProjectId | null;
 }
-export interface ContainerProviderOverviewEntry {
-  readonly provider: ContainerSettings["provider"];
-  readonly providers: ReadonlyArray<ContainerProviderStatus>;
+export interface ContainerRuntimeOverviewEntry {
+  readonly runtime: ContainerSettings["runtime"];
+  readonly runtimes: ReadonlyArray<ContainerRuntimeStatus>;
   readonly workspaces: ReadonlyArray<ContainerWorkspace>;
 }
 interface OverviewState {
   readonly key: string;
-  readonly entries: ReadonlyMap<EnvironmentId, ContainerProviderOverviewEntry>;
+  readonly entries: ReadonlyMap<EnvironmentId, ContainerRuntimeOverviewEntry>;
   readonly errors: ReadonlyMap<EnvironmentId, string>;
   readonly pending: boolean;
 }
@@ -33,10 +33,10 @@ const emptyState = (key: string): OverviewState => ({
   pending: false,
 });
 const message = (cause: unknown) =>
-  cause instanceof Error ? cause.message : "Container provider status is unavailable.";
+  cause instanceof Error ? cause.message : "Container runtime status is unavailable.";
 
-export function useContainerProviderOverview(input: {
-  readonly targets: ReadonlyArray<ContainerProviderOverviewTarget>;
+export function useContainerRuntimeOverview(input: {
+  readonly targets: ReadonlyArray<ContainerRuntimeOverviewTarget>;
   readonly revisionKey?: string;
 }) {
   const registry = use(RegistryContext);
@@ -47,10 +47,10 @@ export function useContainerProviderOverview(input: {
     async (
       targetsKey: string,
       stateKey: string,
-      refreshStatuses: boolean,
+      refreshRuntimes: boolean,
       signal?: AbortSignal,
     ) => {
-      const targets = JSON.parse(targetsKey) as ReadonlyArray<ContainerProviderOverviewTarget>;
+      const targets = JSON.parse(targetsKey) as ReadonlyArray<ContainerRuntimeOverviewTarget>;
       setState((current) => ({
         ...(current.key === stateKey ? current : emptyState(stateKey)),
         pending: true,
@@ -64,7 +64,7 @@ export function useContainerProviderOverview(input: {
               environmentId: target.environmentId,
               input: {
                 ...(target.projectId === null ? {} : { projectId: target.projectId }),
-                ...(refreshStatuses ? { refreshProviders: true } : {}),
+                ...(refreshRuntimes ? { refreshRuntimes: true } : {}),
               },
             },
             { reportFailure: false },
@@ -79,15 +79,15 @@ export function useContainerProviderOverview(input: {
           return {
             target,
             entry: {
-              provider: result.value.provider,
-              providers: result.value.providers,
+              runtime: result.value.runtime,
+              runtimes: result.value.runtimes,
               workspaces: result.value.workspaces,
             },
           } as const;
         }),
       );
       if (signal?.aborted) return;
-      const entries = new Map<EnvironmentId, ContainerProviderOverviewEntry>();
+      const entries = new Map<EnvironmentId, ContainerRuntimeOverviewEntry>();
       const errors = new Map<EnvironmentId, string>();
       for (const result of results) {
         if (result === null) continue;
@@ -97,7 +97,7 @@ export function useContainerProviderOverview(input: {
       setState({ key: stateKey, entries, errors, pending: false });
     },
   );
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Probe each selected environment's provider availability from Settings.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Probe each selected environment's runtime availability from Settings.
   useEffect(() => {
     const abort = new AbortController();
     void load(targetsKey, key, false, abort.signal);

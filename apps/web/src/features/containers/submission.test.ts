@@ -63,7 +63,7 @@ function fixture(confirmed = true) {
     guestEnvironmentId: EnvironmentId.make("guest"),
     guestProjectId: ProjectId.make("guest-project"),
     guestCheckoutPath: "/recorded-checkout",
-    provider: "docker" as const,
+    runtime: "docker" as const,
     label: "Test container",
   };
   const provider: ServerProvider = {
@@ -121,24 +121,10 @@ function fixture(confirmed = true) {
       if (settingsFailure) throw new Error("settings failed");
       return {
         config: DEFAULT_CONTAINER_CONFIG,
-        provider: { default: "docker", project: null, resolved: "docker" },
-        providers: [
-          {
-            provider: "docker",
-            available: true,
-            version: "test",
-            detail: null,
-            requirements: [],
-            checkedAt: 0,
-          },
-          {
-            provider: "podman",
-            available: true,
-            version: "test",
-            detail: null,
-            requirements: [],
-            checkedAt: 0,
-          },
+        runtime: { default: "docker", project: null, resolved: "docker" },
+        runtimes: [
+          { runtime: "docker", available: true, version: "test", detail: null, checkedAt: 0 },
+          { runtime: "podman", available: true, version: "test", detail: null, checkedAt: 0 },
         ],
         available: true,
         workspaces: [],
@@ -542,7 +528,7 @@ it("preserves background intent and cancellation after issuance without retracti
   expect(f.submitted).toHaveLength(1);
 });
 
-it("allows a corrected new operation only after an attributable durable rejection and reuses its container", async () => {
+it("allows a corrected new operation only after an attributable durable rejection and reuses its runtime", async () => {
   const f = fixture();
   f.responseLost(true);
   await f.send();

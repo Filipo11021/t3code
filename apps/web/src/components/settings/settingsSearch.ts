@@ -233,12 +233,12 @@ const SOURCE_CONTROL_HOST_TERMS = sourceControlClients.definitions
 
 export const SETTINGS_SEARCH_ITEMS = [
   {
-    id: "container-provider-setting",
-    title: "Container provider",
+    id: "container-runtime-setting",
+    title: "Container runtime",
     to: "/settings/containers",
-    targetId: "container-provider",
+    targetId: "container-runtime",
     scope: "project-defaults",
-    searchTerms: ["docker podman gondolin provider engine default available"],
+    searchTerms: ["docker podman runtime engine provider default available"],
   },
   {
     id: "container-setup",

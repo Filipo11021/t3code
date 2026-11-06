@@ -1,7 +1,7 @@
 import {
-  CONTAINER_PROVIDER_LABELS,
-  type ContainerProviderKind,
-  type ContainerProviderStatus,
+  CONTAINER_RUNTIME_LABELS,
+  type ContainerRuntimeKind,
+  type ContainerRuntimeStatus,
   type ContainerSettings,
   type ContainerStatus,
 } from "@t3tools/contracts";
@@ -9,13 +9,13 @@ import type { ResolvedSettingsScope } from "../../components/settings/settingsSc
 
 export type ContainerPickerOption = { readonly value: string; readonly label: string };
 export const checkoutLabel = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
-export const containerProviderLabel = (provider: ContainerProviderKind) =>
-  CONTAINER_PROVIDER_LABELS[provider];
-export function containerProviderStatus(
+export const containerRuntimeLabel = (runtime: ContainerRuntimeKind) =>
+  CONTAINER_RUNTIME_LABELS[runtime];
+export function containerRuntimeStatus(
   settings: ContainerSettings | null,
-  provider: ContainerProviderKind,
-): ContainerProviderStatus | null {
-  return settings?.providers.find((status) => status.provider === provider) ?? null;
+  runtime: ContainerRuntimeKind,
+): ContainerRuntimeStatus | null {
+  return settings?.runtimes.find((status) => status.runtime === runtime) ?? null;
 }
 export function containerActivityLabel(
   status: ContainerStatus,

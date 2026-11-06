@@ -87,9 +87,9 @@ export function createContainerCommands<R, E>(
       label: "containers:cleanup",
       tag: WS_METHODS.containersCleanup,
     }),
-    changeProvider: createEnvironmentRpcCommand(runtime, {
-      label: "containers:change-provider",
-      tag: WS_METHODS.containersChangeProvider,
+    changeRuntime: createEnvironmentRpcCommand(runtime, {
+      label: "containers:change-runtime",
+      tag: WS_METHODS.containersChangeRuntime,
     }),
     wake: createEnvironmentRpcCommand(runtime, {
       label: "containers:wake",

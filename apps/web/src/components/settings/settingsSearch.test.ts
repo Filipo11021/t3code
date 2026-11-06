@@ -229,7 +229,7 @@ describe("containers feature toggle", () => {
       .map((item) => item.id)
       .filter(
         (id) =>
-          id === "container-provider-setting" ||
+          id === "container-runtime-setting" ||
           id === "container-setup" ||
           id === "container-runtimes" ||
           id === "containers-feature",
@@ -244,13 +244,13 @@ describe("containers feature toggle", () => {
     );
   });
 
-  it("hides container provider, setup and cleanup while the feature is off but keeps its switch searchable", () => {
+  it("hides container runtime, setup and cleanup while the feature is off but keeps its switch searchable", () => {
     expect(availableContainerIds(false)).toEqual(["containers-feature"]);
   });
 
-  it("keeps container provider, setup and cleanup while the feature is on or unset", () => {
+  it("keeps container runtime, setup and cleanup while the feature is on or unset", () => {
     const items = [
-      "container-provider-setting",
+      "container-runtime-setting",
       "container-setup",
       "container-runtimes",
       "containers-feature",
@@ -259,12 +259,11 @@ describe("containers feature toggle", () => {
     expect(availableContainerIds(undefined)).toEqual(items);
   });
 
-  it("finds the container provider setting", () => {
-    expect(searchSettings("gondolin")[0]).toMatchObject({
-      id: "container-provider-setting",
-      title: "Container provider",
+  it("finds the container runtime setting", () => {
+    expect(searchSettings("podman")[0]).toMatchObject({
+      id: "container-runtime-setting",
       to: "/settings/containers",
-      targetId: "container-provider",
+      targetId: "container-runtime",
       scope: "project-defaults",
     });
   });

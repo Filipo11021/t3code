@@ -13,7 +13,7 @@ import * as TestClock from "effect/testing/TestClock";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import * as SessionStore from "../auth/SessionStore.ts";
 import * as GuestConnection from "./GuestConnection.ts";
-import * as Providers from "./providers.ts";
+import * as Engine from "./engine.ts";
 import type { WorkspaceRecord } from "./registry.ts";
 
 it.effect("waits for long setup hooks after session issuance and bounds total readiness", () =>
@@ -38,7 +38,7 @@ it.effect("waits for long setup hooks after session issuance and bounds total re
       directory: "/state",
       mounts: [],
       containerId: "container",
-      provider: "docker",
+      runtime: "docker",
       staleContainers: [],
       guest: null,
     };
@@ -52,45 +52,37 @@ it.effect("waits for long setup hooks after session issuance and bounds total re
                 cookieName: "test-session",
                 legacyCookieName: undefined,
               }),
-              Layer.succeed(
-                Providers.ContainerProviders,
-                Providers.ContainerProviders.of({
-                  status: (provider) =>
-                    Effect.succeed({
-                      provider,
-                      available: true,
-                      version: "test",
-                      detail: null,
-                      requirements: [],
-                      checkedAt: 0,
-                    }),
-                  inspect: (provider, name) =>
-                    Effect.sync(() => {
-                      expect(provider).toBe("docker");
-                      expect(name).toBe(GuestConnection.containerName(workspaceId));
-                      return {
-                        Id: "container",
-                        Config: {
-                          Labels: { "codes.t3.workspace": workspaceId, "codes.t3.owner": hostId },
-                        },
-                        State: { Running: true },
-                        Mounts: [],
-                        NetworkSettings: {
-                          Ports: { "3773/tcp": [{ HostIp: "127.0.0.1", HostPort: "12345" }] },
-                        },
-                      };
-                    }),
-                  create: () => Effect.die("unused"),
-                  start: () => Effect.void,
-                  stop: () => Effect.void,
-                  remove: () => Effect.void,
-                  exec: (provider) =>
-                    Effect.sync(() => {
-                      expect(provider).toBe("docker");
-                      return JSON.stringify({ sessionId: "session", token: "test-only" });
-                    }),
-                }),
-              ),
+              Layer.mock(Engine.ContainerEngine)({
+                status: (runtime) =>
+                  Effect.succeed({
+                    runtime,
+                    available: true,
+                    version: "test",
+                    detail: null,
+                    checkedAt: 0,
+                  }),
+                inspect: (runtime, name) =>
+                  Effect.sync(() => {
+                    expect(runtime).toBe("docker");
+                    expect(name).toBe(GuestConnection.containerName(workspaceId));
+                    return {
+                      Id: "container",
+                      Config: {
+                        Labels: { "codes.t3.workspace": workspaceId, "codes.t3.owner": hostId },
+                      },
+                      State: { Running: true },
+                      Mounts: [],
+                      NetworkSettings: {
+                        Ports: { "3773/tcp": [{ HostIp: "127.0.0.1", HostPort: "12345" }] },
+                      },
+                    };
+                  }),
+                run: (runtime) =>
+                  Effect.sync(() => {
+                    expect(runtime).toBe("docker");
+                    return JSON.stringify({ sessionId: "session", token: "test-only" });
+                  }),
+              }),
               Layer.succeed(
                 HttpClient.HttpClient,
                 HttpClient.make((request) =>
