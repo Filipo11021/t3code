@@ -303,7 +303,9 @@ export function createContainerSubmission(deps: {
           return;
         }
         if (!deps.supported())
-          throw new Error("Update and connect this host before using project containers.");
+          throw new Error(
+            "Container workspaces are unavailable or turned off in Settings. Choose Local or turn the feature back on.",
+          );
         const live = deps.read();
         if (
           live.source.environmentId !== state.intent.source.environmentId ||

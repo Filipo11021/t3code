@@ -1747,6 +1747,7 @@ export default function ChatView(props: ChatViewProps) {
       isGitRepo:
         isGitRepo ||
         (routeKind === "draft" &&
+          settings.containersEnabled &&
           serverConfig?.environment.capabilities.containerWorkspaces === true),
       showEnvironmentIndicator: showComposerEnvironmentIndicator,
     });

@@ -311,6 +311,16 @@ describe("ClientSettings notifications", () => {
   });
 });
 
+describe("ClientSettings containers feature", () => {
+  it("defaults containers on and carries an explicit off patch", () => {
+    expect(decodeClientSettings({}).containersEnabled).toBe(true);
+    expect(decodeClientSettingsPatch({ containersEnabled: false })).toEqual({
+      containersEnabled: false,
+    });
+    expect(decodeClientSettingsPatch({})).not.toHaveProperty("containersEnabled");
+  });
+});
+
 describe("ClientSettings quit confirmation", () => {
   it.each([
     [true, "hold"],

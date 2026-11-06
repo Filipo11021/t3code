@@ -89,7 +89,11 @@ import {
 import { environmentServerConfigsAtom } from "../../state/server";
 import { threadEnvironment } from "../../state/threads";
 import { runMobileComposerTransition } from "./draftHeroTransition";
-import { useClientSettingsHydrated, useEnvironmentSettings } from "../../hooks/useSettings";
+import {
+  useClientSettingsHydrated,
+  useClientSettings,
+  useEnvironmentSettings,
+} from "../../hooks/useSettings";
 import { environmentPresentations } from "../../state/presentation";
 import {
   approvalRedirectNotice,
@@ -341,6 +345,7 @@ export function useComposerSend(input: ComposerSendInput) {
   const handleNewThread = useNewThreadHandler();
   const navigate = useNavigate();
   const clientSettingsHydrated = useClientSettingsHydrated();
+  const containersEnabled = useClientSettings((settings) => settings.containersEnabled);
   const planModeEnabled = useEnvironmentSettings(environmentId, selectPlanModeEnabled);
   const startThreadTurn = useOrchestrationCommand(threadEnvironment.startTurn, {
     reportFailure: false,
@@ -402,6 +407,7 @@ export function useComposerSend(input: ComposerSendInput) {
       const capabilities = appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)
         ?.environment.capabilities;
       return (
+        containersEnabled &&
         capabilities?.containerWorkspaces === true &&
         capabilities.containerProjects === true &&
         !activeEnvironmentUnavailable &&

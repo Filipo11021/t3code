@@ -16,6 +16,7 @@ import {
   searchSettings,
   SETTINGS_NAV_GROUPS,
   SETTINGS_SEARCH_ITEMS,
+  settingsNavGroups,
   sourceControlHostSearchItems,
   sourceControlHostSettingsSearchId,
   type SettingsSearchItem,
@@ -207,6 +208,47 @@ describe("searchSettings", () => {
   it("keeps catalog result ids unique", () => {
     const ids = SETTINGS_SEARCH_ITEMS.map((item) => item.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+describe("containers feature toggle", () => {
+  const availability = {
+    hasCloudPublicConfig: false,
+    hasEnvironment: true,
+    hasProviderSettingsEnvironment: true,
+    hasMacProviderSettingsEnvironment: false,
+    canManageLocalBackend: true,
+    isWslSettingsRowVisible: false,
+    hasThreadAutoSettlement: false,
+  };
+  const availableContainerIds = (containersEnabled: boolean | undefined) =>
+    filterAvailableSettingsSearchItems({
+      ...availability,
+      ...(containersEnabled === undefined ? {} : { containersEnabled }),
+    })
+      .map((item) => item.id)
+      .filter(
+        (id) =>
+          id === "container-setup" || id === "container-runtimes" || id === "containers-feature",
+      );
+
+  it("keeps the Containers page in the sidebar only while the feature is on", () => {
+    expect(settingsNavGroups(true).flatMap((group) => group.paths)).toContain(
+      "/settings/containers",
+    );
+    expect(settingsNavGroups(false).flatMap((group) => group.paths)).not.toContain(
+      "/settings/containers",
+    );
+  });
+
+  it("hides container setup and cleanup while the feature is off but keeps its switch searchable", () => {
+    expect(availableContainerIds(false)).toEqual(["containers-feature"]);
+  });
+
+  it("keeps container setup and cleanup while the feature is on or unset", () => {
+    const items = ["container-setup", "container-runtimes", "containers-feature"];
+    expect(availableContainerIds(true)).toEqual(items);
+    expect(availableContainerIds(undefined)).toEqual(items);
   });
 });
 

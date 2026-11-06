@@ -22,6 +22,7 @@ import {
 } from "../../components/ui/menu";
 import { serverEnvironment } from "../../state/server";
 import { useStableCallback } from "../../hooks/useStableCallback";
+import { useClientSettings } from "../../hooks/useSettings";
 import { containerOptions } from "./selection";
 import { containerRequestIssued } from "./draftState";
 export function useContainerWorkspacePicker(input: {
@@ -35,6 +36,7 @@ export function useContainerWorkspacePicker(input: {
   const registry = use(RegistryContext);
   const floating = useComposerMenuProps();
   const config = useAtomValue(serverEnvironment.configValueAtom(input.environmentId));
+  const containersEnabled = useClientSettings((settings) => settings.containersEnabled);
   const permission = useAtomValue(
     serverEnvironment.containers.open.permissionAtom(input.environmentId),
   );
@@ -47,6 +49,7 @@ export function useContainerWorkspacePicker(input: {
   const settings =
     loaded?.key === `${input.environmentId}:${input.projectId}` ? loaded.value : null;
   const supported =
+    containersEnabled &&
     config?.environment.capabilities.containerWorkspaces === true &&
     Boolean(input.draftId) &&
     !input.locked;
@@ -79,11 +82,17 @@ export function useContainerWorkspacePicker(input: {
     void load(input.environmentId, input.projectId, abort.signal);
     return () => abort.abort();
   }, [load, input.environmentId, input.projectId, supported, permission]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Turning containers off drops a chosen workspace, while pending Sends stay recoverable.
+  useEffect(() => {
+    if (containersEnabled || !input.draftId || state?.kind !== "selected") return;
+    useComposerDraftStore.getState().setContainerDraft(input.draftId, null);
+  }, [containersEnabled, input.draftId, state]);
   const options = supported ? containerOptions(settings) : [];
-  const selectedValue = state
-    ? state.intent.choice.type === "fresh"
+  const liveState = containersEnabled ? state : null;
+  const selectedValue = liveState
+    ? liveState.intent.choice.type === "fresh"
       ? "container:fresh"
-      : `container:${state.intent.choice.workspaceId}`
+      : `container:${liveState.intent.choice.workspaceId}`
     : null;
   const selectedLabel =
     options.find((option) => option.value === selectedValue)?.label ??

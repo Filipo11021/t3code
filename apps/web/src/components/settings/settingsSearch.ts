@@ -84,6 +84,7 @@ export interface SettingsSearchAvailability {
   readonly hasThreadAutoSettlement: boolean;
   readonly managedTunnelActive?: boolean;
   readonly hasPeerLinkHost?: boolean;
+  readonly containersEnabled?: boolean;
 }
 
 export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
@@ -160,6 +161,14 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<{
     paths: ["/settings/maintenance", "/settings/labs", "/settings/about", "/settings/archived"],
   },
 ];
+
+export function settingsNavGroups(containersEnabled: boolean): typeof SETTINGS_NAV_GROUPS {
+  if (containersEnabled) return SETTINGS_NAV_GROUPS;
+  return SETTINGS_NAV_GROUPS.flatMap((group) => {
+    const paths = group.paths.filter((path) => path !== "/settings/containers");
+    return paths.length === 0 ? [] : [{ heading: group.heading, paths }];
+  });
+}
 
 export function keybindingSearchAnchorId<Command extends KeybindingCommand>(command: Command) {
   return `keybinding-${command}` as const;
@@ -240,6 +249,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     targetId: "container-setup",
     scope: "project-defaults",
     searchTerms: ["container docker stop restart remove retention idle cleanup history"],
+  },
+  {
+    id: "containers-feature",
+    title: "Containers",
+    to: "/settings/general",
+    searchTerms: ["containers docker feature toggle disable hide new container"],
   },
   {
     id: "storage-worktree-keep-when",
@@ -1364,7 +1379,8 @@ export function filterAvailableSettingsSearchItems(
       (!item.wslAvailableOnly || availability.isWslSettingsRowVisible) &&
       (!item.requiresThreadAutoSettlement || availability.hasThreadAutoSettlement) &&
       (!item.managedTunnelOnly || availability.managedTunnelActive === true) &&
-      (!item.peerLinksOnly || availability.hasPeerLinkHost === true),
+      (!item.peerLinksOnly || availability.hasPeerLinkHost === true) &&
+      (item.to !== "/settings/containers" || availability.containersEnabled !== false),
   );
 }
 
