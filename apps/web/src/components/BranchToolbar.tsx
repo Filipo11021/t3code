@@ -149,7 +149,8 @@ function showWorkspaceContextMenu(event: ReactMouseEvent, workspacePath: string)
 }
 
 interface RunContextSelectorProps {
-  containerItems?: ReactNode;
+  containerFreshItem?: ReactNode;
+  containerExistingItem?: ReactNode;
   containerValue?: string | null;
   containerLabel?: string | null;
   containerPending?: boolean;
@@ -177,7 +178,8 @@ interface RunContextSelectorProps {
 }
 
 const RunContextSelector = memo(function RunContextSelector({
-  containerItems,
+  containerFreshItem,
+  containerExistingItem,
   containerValue = null,
   containerLabel = null,
   containerPending = false,
@@ -462,8 +464,9 @@ const RunContextSelector = memo(function RunContextSelector({
                 <PreviousWorktreeItemContent branch={previousWorktreeBranch} />
               </MenuRadioItem>
             ) : null}
-            {containerItems}
+            {containerFreshItem}
           </MenuRadioGroup>
+          {containerExistingItem}
         </MenuGroup>
       </MenuPopup>
     </Menu>
@@ -762,7 +765,8 @@ export const BranchToolbar = memo(function BranchToolbar({
               onUsePreviousWorktree={onUsePreviousWorktree}
               addTargets={addTargets}
               onAddToMachine={onAddToMachine}
-              containerItems={containers.menuItems}
+              containerFreshItem={containers.freshItem}
+              containerExistingItem={containers.existingItem}
               containerValue={containers.selectedValue}
               containerLabel={containers.selectedLabel}
               containerPending={containers.issued}
@@ -821,7 +825,8 @@ export const BranchToolbar = memo(function BranchToolbar({
               onUsePreviousWorktree={onUsePreviousWorktree}
               addTargets={addTargets}
               onAddToMachine={onAddToMachine}
-              containerItems={containers.menuItems}
+              containerFreshItem={containers.freshItem}
+              containerExistingItem={containers.existingItem}
               containerValue={containers.selectedValue}
               containerLabel={containers.selectedLabel}
               containerPending={containers.issued}
@@ -867,9 +872,9 @@ export const BranchToolbar = memo(function BranchToolbar({
                 previousWorktreeLabel={previousWorktreeLabel}
                 previousWorktreeBranch={previousWorktreeSeed?.branch ?? null}
                 onUsePreviousWorktree={onUsePreviousWorktree}
-                containerOptions={containers.options}
+                containerFreshItem={containers.freshItem}
+                containerExistingItem={containers.existingItem}
                 onContainerSelect={containers.onSelect}
-                containersAllowed={containers.allowed}
                 containerValue={containers.selectedValue}
                 containerLabel={containers.selectedLabel}
                 containerPending={containers.issued}

@@ -1,4 +1,4 @@
-import { BoxIcon } from "lucide-react";
+import { BoxesIcon, BoxIcon } from "lucide-react";
 import { use, useEffect, useState } from "react";
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import {
@@ -11,13 +11,19 @@ import {
 import { type DraftId, useComposerDraftStore } from "../../composerDraftStore";
 import { newDraftId } from "../../lib/utils";
 import { runAtomCommand } from "@t3tools/client-runtime/state/runtime";
-import { useComposerMenuProps } from "../../components/chat/composerEventScope";
+import {
+  composerFloatingLayerProps,
+  useComposerMenuProps,
+} from "../../components/chat/composerEventScope";
 import { Button } from "../../components/ui/button";
 import {
   Menu,
   MenuRadioGroup,
   MenuRadioItem,
   MenuPopup,
+  MenuSub,
+  MenuSubPopup,
+  MenuSubTrigger,
   MenuTrigger,
 } from "../../components/ui/menu";
 import { serverEnvironment } from "../../state/server";
@@ -127,14 +133,47 @@ export function useContainerWorkspacePicker(input: {
       },
     });
   };
-  const menuItems = options.map((option) => (
-    <MenuRadioItem key={option.value} value={option.value} disabled={!allowed} closeOnClick>
-      <span className="inline-flex min-w-0 items-center gap-1.5">
-        <BoxIcon className="size-3" />
-        <span className="min-w-0 truncate">{option.label}</span>
-      </span>
-    </MenuRadioItem>
-  ));
+  const fresh = options[0];
+  const existing = options.slice(1);
+  const freshItem =
+    supported && fresh ? (
+      <MenuRadioItem value={fresh.value} disabled={!allowed} closeOnClick>
+        <span className="inline-flex min-w-0 items-center gap-1.5">
+          <BoxIcon className="size-3" />
+          <span className="min-w-0 truncate">{fresh.label}</span>
+        </span>
+      </MenuRadioItem>
+    ) : null;
+  const existingItem =
+    supported && existing.length > 0 ? (
+      <MenuSub>
+        <MenuSubTrigger disabled={!allowed}>
+          <span className="inline-flex min-w-0 items-center gap-1.5">
+            <BoxesIcon className="size-3" />
+            <span className="min-w-0 truncate">
+              {existing.length === 1 ? "Existing container" : "Existing containers"}
+            </span>
+          </span>
+        </MenuSubTrigger>
+        <MenuSubPopup {...composerFloatingLayerProps}>
+          <MenuRadioGroup value={selectedValue ?? ""} onValueChange={onSelect}>
+            {existing.map((option) => (
+              <MenuRadioItem
+                key={option.value}
+                value={option.value}
+                disabled={!allowed}
+                closeOnClick
+              >
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <BoxIcon className="size-3" />
+                  <span className="min-w-0 truncate">{option.label}</span>
+                </span>
+              </MenuRadioItem>
+            ))}
+          </MenuRadioGroup>
+        </MenuSubPopup>
+      </MenuSub>
+    ) : null;
   const standalone = supported ? (
     <Menu>
       <MenuTrigger render={<Button variant="ghost" size="xs" />} data-composer-context-control>
@@ -154,17 +193,17 @@ export function useContainerWorkspacePicker(input: {
           <MenuRadioItem value="local" disabled={issued} closeOnClick>
             Local
           </MenuRadioItem>
-          {menuItems}
+          {freshItem}
         </MenuRadioGroup>
+        {existingItem}
       </MenuPopup>
     </Menu>
   ) : null;
   return {
-    options,
-    menuItems,
+    freshItem,
+    existingItem,
     standalone,
     onSelect,
-    allowed,
     selectedValue,
     selectedLabel,
     issued,
