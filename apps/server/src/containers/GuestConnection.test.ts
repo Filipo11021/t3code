@@ -61,6 +61,7 @@ it.effect("waits for long setup hooks after session issuance and bounds total re
                       available: true,
                       version: "test",
                       detail: null,
+                      requirements: [],
                       checkedAt: 0,
                     }),
                   inspect: (provider, name) =>

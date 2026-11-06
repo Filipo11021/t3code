@@ -216,16 +216,43 @@ const make = Effect.gen(function* () {
       version.success.code === 0 &&
       info._tag === "Success" &&
       info.success.code === 0;
+    const label = CONTAINER_PROVIDER_LABELS[provider];
+    const cliAvailable = version._tag === "Success" && version.success.code === 0;
+    const daemonAvailable = info._tag === "Success" && info.success.code === 0;
+    const requirements = [
+      {
+        id: "cli",
+        label: `${label} CLI`,
+        required: true,
+        available: cliAvailable,
+        detail: cliAvailable
+          ? null
+          : version._tag === "Success"
+            ? lastLine(version.success.stderr)
+            : null,
+      },
+      {
+        id: "daemon",
+        label: `${label} ${provider === "docker" ? "daemon" : "service"}`,
+        required: true,
+        available: daemonAvailable,
+        detail: daemonAvailable
+          ? null
+          : ((info._tag === "Success" ? lastLine(info.success.stderr) : null) ??
+            `Start ${label} and try again.`),
+      },
+    ];
     const detail = available
       ? null
       : ((info._tag === "Success" ? lastLine(info.success.stderr) : null) ??
         (version._tag === "Success" ? lastLine(version.success.stderr) : null) ??
-        `${CONTAINER_PROVIDER_LABELS[provider]} is not installed or is not responding.`);
+        `${label} is not installed or is not responding.`);
     const result: ContainerProviderStatus = {
       provider,
       available,
       version: versionLine,
       detail,
+      requirements,
       checkedAt: now,
     };
     yield* Ref.update(cache, (entries) => new Map(entries).set(provider, result));

@@ -1,6 +1,7 @@
 import { use, useEffect, useState } from "react";
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
+import { CheckIcon, XIcon } from "lucide-react";
 import {
   CONTAINER_PROVIDER_KINDS,
   ContainerCleanupRules,
@@ -218,6 +219,40 @@ function ContainerProviderSection() {
                           ? (status.version ?? "Version unavailable")
                           : (status?.detail ?? "No status reported.")}
                       </p>
+                      {status && status.requirements.length > 0 ? (
+                        <ul className="space-y-0.5">
+                          {status.requirements.map((requirement) => (
+                            <li
+                              key={requirement.id}
+                              className="flex items-start gap-1 text-xs text-muted-foreground"
+                            >
+                              {requirement.available ? (
+                                <CheckIcon
+                                  aria-hidden
+                                  className="mt-0.5 size-3 shrink-0 text-success"
+                                />
+                              ) : (
+                                <XIcon
+                                  aria-hidden
+                                  className={`mt-0.5 size-3 shrink-0 ${
+                                    requirement.required
+                                      ? "text-destructive"
+                                      : "text-muted-foreground"
+                                  }`}
+                                />
+                              )}
+                              <span
+                                className={requirement.available ? undefined : "text-foreground"}
+                              >
+                                {requirement.label}
+                                {!requirement.available && requirement.detail
+                                  ? ` · ${requirement.detail}`
+                                  : ""}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
                       <p className="text-xs text-muted-foreground">
                         Used by {count} {count === 1 ? "container" : "containers"}
                       </p>

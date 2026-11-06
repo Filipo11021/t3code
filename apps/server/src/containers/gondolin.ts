@@ -4,6 +4,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -26,12 +27,29 @@ const MINIMUM_NODE = [22, 19] as const;
 const requireForGondolin = NodeModule.createRequire(import.meta.url);
 const PackageJson = Schema.Struct({ version: Schema.String });
 const decodePackageJson = Schema.decodeEffect(Schema.fromJsonString(PackageJson));
+const GuestManifest = Schema.Struct({
+  config: Schema.optionalKey(Schema.Struct({ arch: Schema.optionalKey(Schema.String) })),
+  assets: Schema.optionalKey(
+    Schema.Struct({
+      kernel: Schema.String,
+      initramfs: Schema.String,
+      rootfs: Schema.String,
+    }),
+  ),
+});
+const decodeGuestManifest = Schema.decodeEffect(Schema.fromJsonString(GuestManifest));
 
 const firstLine = (value: string) =>
   value
     .split(/\r?\n/)
     .map((line) => line.trim())
     .find((line) => line.length > 0)
+    ?.slice(0, 200) ?? null;
+const lastLine = (value: string) =>
+  value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .findLast((line) => line.length > 0)
     ?.slice(0, 200) ?? null;
 
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
@@ -128,6 +146,48 @@ const make = Effect.gen(function* () {
     );
   });
 
+  const guestAssets = Effect.fn("GondolinEngine.guestAssets")(function* () {
+    const directory = guestDirectory();
+    if (!directory) {
+      return {
+        available: false,
+        detail: "Set T3CODE_GONDOLIN_GUEST_DIR to the built guest image directory.",
+      };
+    }
+    const manifestPath = join(directory, "manifest.json");
+    if (!(yield* fs.exists(manifestPath).pipe(Effect.orElseSucceed(() => false)))) {
+      return { available: false, detail: "manifest.json is missing from the guest image." };
+    }
+    const manifest = yield* fs
+      .readFileString(manifestPath)
+      .pipe(Effect.flatMap(decodeGuestManifest), Effect.option);
+    if (Option.isNone(manifest)) {
+      return { available: false, detail: "manifest.json cannot be decoded." };
+    }
+    const expected = architecture === "arm64" ? "aarch64" : "x86_64";
+    const actual = manifest.value.config?.arch;
+    if (actual !== undefined && actual !== expected) {
+      return {
+        available: false,
+        detail: `Guest image is ${actual}; this host needs ${expected}.`,
+      };
+    }
+    const assets = manifest.value.assets;
+    if (!assets) {
+      return { available: false, detail: "manifest.json does not list guest assets." };
+    }
+    for (const [label, filename] of [
+      ["kernel", assets.kernel],
+      ["initramfs", assets.initramfs],
+      ["rootfs", assets.rootfs],
+    ] as const) {
+      if (!(yield* fs.exists(join(directory, filename)).pipe(Effect.orElseSucceed(() => false)))) {
+        return { available: false, detail: `${label} is missing from the guest image.` };
+      }
+    }
+    return { available: true, detail: null };
+  });
+
   const status = Effect.fn("GondolinEngine.status")(function* (options?: {
     readonly refresh?: boolean;
   }) {
@@ -139,43 +199,111 @@ const make = Effect.gen(function* () {
     const supportedPlatform = platform === "darwin" || platform === "linux";
     const nodeAvailable = nodeSupportsGondolin();
     const moduleAvailable = yield* loadModule().pipe(Effect.result);
-    const qemu = yield* runner
-      .run({
-        command: qemuBinary(architecture),
-        args: ["--version"],
-        timeout: PROBE_TIMEOUT,
-        maxOutputBytes: 16 * 1024,
-        outputMode: "truncate",
-      })
-      .pipe(Effect.result);
+    const probe = (command: string) =>
+      runner
+        .run({
+          command,
+          args: ["--version"],
+          timeout: PROBE_TIMEOUT,
+          maxOutputBytes: 16 * 1024,
+          outputMode: "truncate",
+        })
+        .pipe(Effect.result);
+    const qemu = yield* probe(qemuBinary(architecture));
+    const qemuImg = yield* probe("qemu-img");
     const qemuLine =
       qemu._tag === "Success" && qemu.success.code === 0 ? firstLine(qemu.success.stdout) : null;
-    const directory = guestDirectory();
-    const assetsAvailable =
-      directory !== null &&
-      (yield* fs.exists(join(directory, "manifest.json")).pipe(Effect.orElseSucceed(() => false)));
-    const available =
+    const qemuImgAvailable = qemuImg._tag === "Success" && qemuImg.success.code === 0;
+    const qemuDetail =
+      qemuLine !== null
+        ? null
+        : ((qemu._tag === "Success" ? lastLine(qemu.success.stderr) : null) ??
+          `Install ${qemuBinary(architecture)} and make sure it is on PATH.`);
+    const qemuImgDetail = qemuImgAvailable
+      ? null
+      : ((qemuImg._tag === "Success" ? lastLine(qemuImg.success.stderr) : null) ??
+        "Install qemu-utils and make sure qemu-img is on PATH.");
+    const guest = yield* guestAssets();
+    const accelerationAvailable =
       supportedPlatform &&
-      nodeAvailable &&
-      moduleAvailable._tag === "Success" &&
-      qemuLine !== null &&
-      assetsAvailable;
+      (platform === "darwin" ||
+        (yield* fs.access("/dev/kvm", { readable: true, writable: true }).pipe(
+          Effect.as(true),
+          Effect.orElseSucceed(() => false),
+        )));
+    const accelerationLabel = platform === "darwin" ? "HVF acceleration" : "KVM acceleration";
+    const accelerationDetail = accelerationAvailable
+      ? null
+      : platform === "linux"
+        ? "KVM is unavailable; QEMU will use software emulation."
+        : "Hardware acceleration is unavailable on this host.";
+    const requirements = [
+      {
+        id: "platform",
+        label: "macOS or Linux host",
+        required: true,
+        available: supportedPlatform,
+        detail: supportedPlatform ? null : `This host is ${platform}.`,
+      },
+      {
+        id: "node",
+        label: `Node.js ${MINIMUM_NODE.join(".")}+`,
+        required: true,
+        available: nodeAvailable,
+        detail: nodeAvailable ? null : `This server runs Node ${process.versions.node}.`,
+      },
+      {
+        id: "sdk",
+        label: "Gondolin SDK",
+        required: true,
+        available: moduleAvailable._tag === "Success",
+        detail:
+          moduleAvailable._tag === "Success"
+            ? null
+            : "Install @earendil-works/gondolin on this host.",
+      },
+      {
+        id: "qemu",
+        label: `QEMU (${qemuBinary(architecture)})`,
+        required: true,
+        available: qemuLine !== null,
+        detail: qemuDetail,
+      },
+      {
+        id: "qemu-img",
+        label: "qemu-img",
+        required: true,
+        available: qemuImgAvailable,
+        detail: qemuImgDetail,
+      },
+      {
+        id: "guest-image",
+        label: "Guest image",
+        required: true,
+        available: guest.available,
+        detail: guest.detail,
+      },
+      {
+        id: "acceleration",
+        label: accelerationLabel,
+        required: false,
+        available: accelerationAvailable,
+        detail: accelerationDetail,
+      },
+    ];
+    const missing = requirements.filter(
+      (requirement) => requirement.required && !requirement.available,
+    );
+    const available = missing.length === 0;
     const detail = available
       ? null
-      : !supportedPlatform
-        ? "Gondolin supports macOS and Linux hosts."
-        : !nodeAvailable
-          ? `Gondolin requires Node.js ${MINIMUM_NODE.join(".")} or later. This server runs Node ${process.versions.node}.`
-          : moduleAvailable._tag === "Failure"
-            ? "Gondolin is not installed. Install the gondolin package on this host."
-            : qemuLine === null
-              ? `QEMU is required. Install ${qemuBinary(architecture)} and make sure it is on PATH.`
-              : "Gondolin guest image not found. Set T3CODE_GONDOLIN_GUEST_DIR to a guest image built with an Ubuntu rootfs and T3's Linux runtime.";
+      : `Missing: ${missing.map((requirement) => requirement.label).join(", ")}.`;
     const result: ContainerProviderStatus = {
       provider: "gondolin",
       available,
       version: version ? `Gondolin ${version}${qemuLine ? ` · ${qemuLine}` : ""}` : qemuLine,
       detail,
+      requirements,
       checkedAt: now,
     };
     yield* Ref.set(cache, result);

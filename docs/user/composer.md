@@ -422,7 +422,7 @@ keeps the checkout, guest home, installed packages and threads. If the old provi
 reached when you change, T3 removes its container later when that provider is available again.
 
 Gondolin runs the workspace in a micro-VM instead of a Docker or Podman container. It needs
-QEMU on the host and a guest image built from an Ubuntu OCI rootfs, because the T3 guest
+QEMU and qemu-img on the host and a guest image built from an Ubuntu OCI rootfs, because the T3 guest
 runtime is a glibc binary. Build the image with Gondolin's custom image flow and point
 `T3CODE_GONDOLIN_GUEST_DIR` at the build output. Without QEMU or that image, Settings reports
 Gondolin as unavailable and other providers keep working. Gondolin allows HTTP and HTTPS

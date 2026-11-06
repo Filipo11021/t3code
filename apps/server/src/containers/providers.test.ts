@@ -11,6 +11,7 @@ const status = (provider: "docker" | "podman" | "gondolin"): ContainerProviderSt
   available: true,
   version: provider,
   detail: null,
+  requirements: [],
   checkedAt: 0,
 });
 

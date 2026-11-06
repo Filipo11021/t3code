@@ -90,6 +90,7 @@ const fixture = Effect.gen(function* () {
         available: availableProviders.get(provider) ?? true,
         version: "test-version",
         detail: null,
+        requirements: [],
         checkedAt: 0,
       }),
     create: (input) =>

@@ -22,11 +22,23 @@ export const CONTAINER_PROVIDER_LABELS: Record<ContainerProviderKind, string> = 
   gondolin: "Gondolin",
 };
 
+export const ContainerProviderRequirement = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+  required: Schema.Boolean,
+  available: Schema.Boolean,
+  detail: Schema.NullOr(Schema.String),
+});
+export type ContainerProviderRequirement = typeof ContainerProviderRequirement.Type;
+
 export const ContainerProviderStatus = Schema.Struct({
   provider: ContainerProviderKind,
   available: Schema.Boolean,
   version: Schema.NullOr(Schema.String),
   detail: Schema.NullOr(Schema.String),
+  requirements: Schema.Array(ContainerProviderRequirement).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
   checkedAt: Schema.Number,
 });
 export type ContainerProviderStatus = typeof ContainerProviderStatus.Type;

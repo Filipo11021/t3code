@@ -40,7 +40,21 @@ const withGuestDirectory = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
         directory: "/tmp/opencode",
         prefix: "gondolin-status-",
       });
-      yield* fs.writeFileString(path.join(directory, "manifest.json"), "{}");
+      yield* fs.writeFileString(
+        path.join(directory, "manifest.json"),
+        JSON.stringify({
+          version: 1,
+          config: { arch: "x86_64" },
+          assets: {
+            kernel: "vmlinuz-virt",
+            initramfs: "initramfs.cpio.lz4",
+            rootfs: "rootfs.ext4",
+          },
+        }),
+      );
+      for (const file of ["vmlinuz-virt", "initramfs.cpio.lz4", "rootfs.ext4"]) {
+        yield* fs.writeFileString(path.join(directory, file), "");
+      }
       const previous = process.env.T3CODE_GONDOLIN_GUEST_DIR;
       process.env.T3CODE_GONDOLIN_GUEST_DIR = directory;
       return { previous, directory };
@@ -72,6 +86,16 @@ it.effect("reports Gondolin available when the SDK, QEMU and guest image exist",
     });
     expect(status.version).toContain("Gondolin");
     expect(status.version).toContain("QEMU emulator version 9.0.0");
+    expect(status.requirements.filter((requirement) => requirement.required)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "qemu", available: true }),
+        expect.objectContaining({ id: "qemu-img", available: true }),
+        expect.objectContaining({ id: "guest-image", available: true }),
+      ]),
+    );
+    expect(
+      status.requirements.find((requirement) => requirement.id === "acceleration"),
+    ).toMatchObject({ required: false });
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
@@ -92,7 +116,10 @@ it.effect("reports the missing guest image instead of a generic failure", () =>
       ),
     );
     expect(status.available).toBe(false);
-    expect(status.detail).toContain("T3CODE_GONDOLIN_GUEST_DIR");
+    expect(status.detail).toContain("Guest image");
+    expect(
+      status.requirements.find((requirement) => requirement.id === "guest-image")?.detail,
+    ).toContain("T3CODE_GONDOLIN_GUEST_DIR");
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
@@ -113,5 +140,33 @@ it.effect("reports QEMU when the guest image exists but the binary does not", ()
     const status = yield* withGuestDirectory(engine.status());
     expect(status.available).toBe(false);
     expect(status.detail).toContain("QEMU");
+    expect(status.requirements.find((requirement) => requirement.id === "qemu")).toMatchObject({
+      available: false,
+    });
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect("reports qemu-img when the QEMU system binary works but qemu-img does not", () =>
+  Effect.gen(function* () {
+    const engine = yield* Gondolin.GondolinEngine.pipe(
+      Effect.provide(
+        layerWith((request) =>
+          Effect.succeed(
+            request.command === "qemu-img"
+              ? output({
+                  stderr: "qemu-img: not found",
+                  code: ChildProcessSpawner.ExitCode(1),
+                })
+              : output({ stdout: "QEMU emulator version 9.0.0\n" }),
+          ),
+        ),
+      ),
+    );
+    const status = yield* withGuestDirectory(engine.status());
+    expect(status.available).toBe(false);
+    expect(status.detail).toContain("qemu-img");
+    expect(status.requirements.find((requirement) => requirement.id === "qemu-img")).toMatchObject({
+      available: false,
+    });
   }).pipe(Effect.provide(NodeServices.layer)),
 );

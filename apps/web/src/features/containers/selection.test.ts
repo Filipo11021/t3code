@@ -25,6 +25,7 @@ const available = (provider: ContainerProviderKind): ContainerProviderStatus => 
   available: true,
   version: "test",
   detail: null,
+  requirements: [],
   checkedAt: 0,
 });
 const unavailable = (provider: ContainerProviderKind): ContainerProviderStatus => ({
@@ -32,6 +33,7 @@ const unavailable = (provider: ContainerProviderKind): ContainerProviderStatus =
   available: false,
   version: null,
   detail: "not installed",
+  requirements: [],
   checkedAt: 0,
 });
 const destination: ContainerDestination = {

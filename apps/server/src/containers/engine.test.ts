@@ -43,6 +43,10 @@ it.effect("reports Docker available from a working info probe", () =>
       available: true,
       version: "Docker version 29.1.3, build test",
       detail: null,
+      requirements: [
+        { id: "cli", label: "Docker CLI", required: true, available: true, detail: null },
+        { id: "daemon", label: "Docker daemon", required: true, available: true, detail: null },
+      ],
       checkedAt: 0,
     });
   }),
@@ -72,6 +76,16 @@ it.effect("reports Podman unavailable with the final error line and caches the p
     expect(first.available).toBe(false);
     expect(first.version).toBe("podman version 5.7.0");
     expect(first.detail).toBe("Error: cannot set up namespace using newuidmap");
+    expect(first.requirements).toEqual([
+      { id: "cli", label: "Podman CLI", required: true, available: true, detail: null },
+      {
+        id: "daemon",
+        label: "Podman service",
+        required: true,
+        available: false,
+        detail: "Error: cannot set up namespace using newuidmap",
+      },
+    ]);
     expect(second).toBe(first);
     expect(probes).toBe(2);
   }),
