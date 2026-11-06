@@ -119,9 +119,7 @@ describe("settings scope resolution", () => {
           environments,
         ),
       ),
-    ).toEqual([
-      { environmentId: laptopId, projectId: second.id, label: "T3 Code · second" },
-    ]);
+    ).toEqual([{ environmentId: laptopId, projectId: second.id, label: "T3 Code · second" }]);
   });
 
   it.each([
