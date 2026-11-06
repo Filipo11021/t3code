@@ -407,7 +407,7 @@ Custom cleanup. Host scope edits defaults. Aggregate scope shows each concrete t
 saves each independently. Setup edits affect new containers. Cleanup uses current policy
 for existing runtimes. A managed container idles after its guest reports no running work for
 the configured window, two minutes by default. **Settings > Containers > Container cleanup >
-Idle after** changes that window; turn the switch off to keep containers running. A stopped
+Idle after** changes that window; turn the switch off to keep containers running. An idle
 container wakes from the thread's **Wake container** action or when you open it from the
 workspace menu. The install script retries until successful and runs again when a
 removed runtime is recreated. The finite start script must finish before T3 is ready.

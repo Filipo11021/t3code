@@ -838,8 +838,9 @@ const make = Effect.gen(function* () {
       const rules = yield* cleanupRulesFor(record);
       if (rules === null || rules.idleStopMinutes === null) continue;
       const now = yield* Clock.currentTimeMillis;
-      const guestIdle = yield* guests.idle(record).pipe(Effect.orElseSucceed(() => false));
-      if (!guestIdle) {
+      const guestIdle = yield* guests.idle(record).pipe(Effect.option);
+      if (Option.isNone(guestIdle)) continue;
+      if (!guestIdle.value) {
         if (now - record.lastUsedAt >= 60_000) yield* touch(record.id).pipe(Effect.ignore);
         continue;
       }
