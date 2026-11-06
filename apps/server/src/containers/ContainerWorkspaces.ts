@@ -801,9 +801,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const record = yield* find(id);
         if (record.status.type !== "ready") return;
-        const now = yield* Clock.currentTimeMillis;
-        if (now - record.lastUsedAt < 60_000) return;
-        yield* registry.save({ ...record, lastUsedAt: now });
+        yield* registry.save({ ...record, lastUsedAt: yield* Clock.currentTimeMillis });
       }),
     );
   });
@@ -841,7 +839,7 @@ const make = Effect.gen(function* () {
       const guestIdle = yield* guests.idle(record).pipe(Effect.option);
       if (Option.isNone(guestIdle)) continue;
       if (!guestIdle.value) {
-        if (now - record.lastUsedAt >= 60_000) yield* touch(record.id).pipe(Effect.ignore);
+        yield* touch(record.id).pipe(Effect.ignore);
         continue;
       }
       if (now - record.lastUsedAt < rules.idleStopMinutes * 60_000) continue;
