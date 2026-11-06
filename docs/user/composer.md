@@ -385,26 +385,30 @@ Android opens a compatible installed file viewer.
 
 ## Container workspaces
 
-On web and desktop, open an unsent draft's workspace menu and choose **Fresh Ubuntu
-container** or **Existing container**. Fresh containers use `ubuntu:26.04` by default.
-Existing selection reuses a compatible container previously created for that checkout.
-T3 does not install into or remove arbitrary external containers.
+On web and desktop, choose **New container** or a managed container directly in an unsent
+draft's workspace menu, then Send. Selection does not provision anything. First Send asks
+you to confirm the project's environment. **Save and continue** saves it and sends the
+preserved prompt only inside the guest. Later new containers reuse that setup, including
+intentionally empty scripts. The default image is `ubuntu:26.04`. Existing containers keep
+their recorded checkout and setup. T3 does not manage arbitrary external containers.
 
-The draft moves to a separate T3 environment before you send it. Source files and Git
-metadata remain shared with the host. Processes, home, provider sign-in, and conversation
-history belong to the guest. Set up your provider inside that environment. Attachments
-and host context cannot move with the draft yet. Remove them first and attach files again
-after moving. A setup failure preserves the source draft and never starts a host agent.
+Source files and Git metadata remain shared with the host. Processes, home, provider
+sign-in and conversation history belong to the guest. Set up your provider inside that
+environment. First container Send supports ordinary text with one model. Remove attachments
+and host context first. Setup, provider and navigation failures preserve your source.
+After an uncertain response, inspect the original Send or explicitly continue it. Reload,
+reconnect and provider sign-in never send automatically. Stop waiting does not retract an
+issued message. Use the guest thread's Stop action for a committed run.
 
-Use **Settings > Containers** on the host to configure install and start scripts, plain
-non-secret environment variables, and idle cleanup. Setup changes affect new containers.
-The install script runs once after success for a setup revision. The start script must
-finish before T3 starts on each restart. Runtime removal retains guest home and history,
-so reopening can restore the same environment. Cleanup retains busy or unreachable guests.
-Close terminals, stop running turns, and disable guest schedules before stopping a guest.
-Schedules do not wake a stopped container.
+Use **Settings > Containers** with project scope to edit setup and choose Inherit, Off or
+Custom cleanup. Host scope edits defaults. Aggregate scope shows each concrete target and
+saves each independently. Setup edits affect new containers. Cleanup uses current policy
+for existing runtimes. The install script retries until successful and runs again when a
+removed runtime is recreated. The finite start script must finish before T3 is ready.
+Runtime removal keeps source files, guest home and history. Busy, unknown and unreachable
+guests are retained. Schedules do not wake a stopped container.
 
 Container access requires full host maintenance permissions. Native mobile does not yet
-offer container setup or draft transfer. Guest provider OAuth callbacks that require a
+offer container creation or setup. Guest provider OAuth callbacks that require a
 separate localhost listener are not forwarded; use the provider's supported device-code
 or token sign-in instead.

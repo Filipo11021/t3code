@@ -228,8 +228,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Container install, start, and environment",
     to: "/settings/containers",
     targetId: "container-setup",
-    scope: "environment",
-    environmentOnly: true,
+    scope: "project-defaults",
     searchTerms: [
       "docker ubuntu container workspace image install script start environment variables setup",
     ],
@@ -238,9 +237,8 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "container-runtimes",
     title: "Container cleanup and retained history",
     to: "/settings/containers",
-    targetId: "container-runtimes",
-    scope: "environment",
-    environmentOnly: true,
+    targetId: "container-setup",
+    scope: "project-defaults",
     searchTerms: ["container docker stop restart remove retention idle cleanup history"],
   },
   {
@@ -1219,7 +1217,7 @@ export type SettingsSearchItemId = (typeof SETTINGS_SEARCH_ITEMS)[number]["id"];
 const SEARCH_ITEMS_BY_ID = new Map(SETTINGS_SEARCH_ITEMS.map((item) => [item.id, item] as const));
 
 const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScope | null>> = {
-  "/settings/containers": "environment",
+  "/settings/containers": "project-defaults",
   "/settings/diagnostics": "environment",
   "/settings/projects": "project",
   "/settings/general": null,

@@ -6,6 +6,7 @@ import type {
   SidebarProjectSnapshot,
 } from "../../sidebarProjectGrouping";
 import { resolveSettingsScope, validateSettingsScopeSearch } from "./settingsScope";
+import { containerSettingsTargets } from "../../features/containers/selection";
 
 const laptopId = EnvironmentId.make("laptop");
 const serverId = EnvironmentId.make("server");
@@ -82,6 +83,17 @@ describe("settings scope resolution", () => {
       members: [first, second, third],
       environmentIds: [laptopId, serverId],
     });
+    expect(
+      containerSettingsTargets(resolveSettingsScope({ project: "t3code" }, groups, environments)),
+    ).toEqual([
+      { environmentId: laptopId, projectId: first.id, label: "T3 Code · /repos/first" },
+      { environmentId: laptopId, projectId: second.id, label: "T3 Code · /repos/second" },
+      { environmentId: serverId, projectId: third.id, label: "T3 Code · /repos/third" },
+    ]);
+    expect(containerSettingsTargets(resolveSettingsScope({}, groups, environments))).toEqual([
+      { environmentId: laptopId, projectId: null, label: "Host defaults" },
+      { environmentId: serverId, projectId: null, label: "Host defaults" },
+    ]);
   });
 
   it("narrows a checkout target to exactly one member, deriving its environment when omitted", () => {
@@ -99,6 +111,17 @@ describe("settings scope resolution", () => {
       members: [second],
       environmentIds: [laptopId],
     });
+    expect(
+      containerSettingsTargets(
+        resolveSettingsScope(
+          { project: "t3code", checkout: second.physicalProjectKey },
+          groups,
+          environments,
+        ),
+      ),
+    ).toEqual([
+      { environmentId: laptopId, projectId: second.id, label: "T3 Code · /repos/second" },
+    ]);
   });
 
   it.each([
@@ -115,6 +138,9 @@ describe("settings scope resolution", () => {
       members: [],
       environmentIds: [],
     });
+    expect(containerSettingsTargets(resolveSettingsScope(search, groups, environments))).toEqual(
+      [],
+    );
   });
 
   it("leaves a removed checkout unavailable while sibling checkouts remain", () => {

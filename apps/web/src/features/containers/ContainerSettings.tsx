@@ -2,170 +2,64 @@ import { use, useEffect, useState } from "react";
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import {
-  ContainerConfig,
+  ContainerCleanupRules,
   ContainerOperationId,
-  type ContainerActionInput,
+  DEFAULT_CONTAINER_CONFIG,
+  CONTAINER_MAX_IDLE_MINUTES,
+  CONTAINER_MAX_REMOVAL_DAYS,
   type ContainerSettings,
+  type ContainerSetup,
   type EnvironmentId,
+  type ProjectId,
+  type ProjectContainerCleanup,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { runAtomCommand, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { serverEnvironment } from "../../state/server";
 import { ensureLocalApi } from "../../localApi";
 import { Button } from "../../components/ui/button";
-import { Input } from "../../components/ui/input";
-import { Textarea } from "../../components/ui/textarea";
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from "../../components/ui/select";
 import { useSettingsScope } from "../../components/settings/SettingsScopeContext";
-import { SettingsPageContainer, SettingsSection } from "../../components/settings/settingsLayout";
+import {
+  SettingsPageContainer,
+  SettingsSection,
+  SettingsRow,
+} from "../../components/settings/settingsLayout";
+import { RetentionControl } from "../../components/settings/RetentionControl";
 import { newDraftId } from "../../lib/utils";
 import { useStableCallback } from "../../hooks/useStableCallback";
-const decodeConfig = Schema.decodeSync(ContainerConfig);
-const decodeEnvironment = Schema.decodeSync(
-  Schema.fromJsonString(ContainerConfig.fields.environment),
-);
+import { ContainerEnvironmentSetup } from "./ContainerEnvironmentSetup";
+import { containerSettingsTargets } from "./selection";
 
+const validCleanup = Schema.is(ContainerCleanupRules);
+const bounded = (value: number | null, maximum: number) =>
+  value !== null && Number.isInteger(value) && value >= 1 && value <= maximum ? value : null;
+const writableRules = (rules: ContainerCleanupRules): ContainerCleanupRules => ({
+  idleStopMinutes: bounded(rules.idleStopMinutes, CONTAINER_MAX_IDLE_MINUTES),
+  removeAfterDays: bounded(rules.removeAfterDays, CONTAINER_MAX_REMOVAL_DAYS),
+});
 const message = (cause: unknown) =>
   cause instanceof Error ? cause.message : "Container operation failed.";
 
-function ContainerConfigEditor({
-  initial,
-  onSave,
-  disabled,
+function ContainerSettingsForTarget({
+  environmentId,
+  projectId,
+  label,
 }: {
-  initial: ContainerConfig;
-  onSave: (value: ContainerConfig) => Promise<void>;
-  disabled: boolean;
+  environmentId: EnvironmentId;
+  projectId: ProjectId | null;
+  label: string;
 }) {
-  const [image, setImage] = useState(initial.image);
-  const [installScript, setInstallScript] = useState(initial.installScript);
-  const [startScript, setStartScript] = useState(initial.startScript);
-  const [environment, setEnvironment] = useState(JSON.stringify(initial.environment, null, 2));
-  const [idle, setIdle] = useState(initial.cleanup.idleStopMinutes?.toString() ?? "");
-  const [retention, setRetention] = useState(initial.cleanup.removeAfterDays?.toString() ?? "");
-  const [error, setError] = useState<string | null>(null);
-  const save = async () => {
-    try {
-      const value = decodeConfig({
-        image,
-        installScript,
-        startScript,
-        environment: decodeEnvironment(environment),
-        cleanup: {
-          idleStopMinutes: idle.trim() ? Number(idle) : null,
-          removeAfterDays: retention.trim() ? Number(retention) : null,
-        },
-      });
-      await onSave(value);
-      setError(null);
-    } catch (cause) {
-      setError(message(cause));
-    }
-  };
-  return (
-    <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        Changes apply to new containers. Reused containers keep their setup snapshot. Values are
-        saved on this host, not in the browser.
-      </p>
-      <label className="grid gap-2 text-sm">
-        Base image
-        <Input
-          aria-label="Container image"
-          value={image}
-          onChange={(event) => setImage(event.target.value)}
-          disabled={disabled}
-        />
-      </label>
-      <label className="grid gap-2 text-sm">
-        Install script
-        <Textarea
-          aria-label="Container install script"
-          rows={4}
-          value={installScript}
-          onChange={(event) => setInstallScript(event.target.value)}
-          disabled={disabled}
-        />
-        <span className="text-xs text-muted-foreground">
-          Runs as the guest user once after success for this setup revision. Retrying a failure can
-          repeat partially completed work.
-        </span>
-      </label>
-      <label className="grid gap-2 text-sm">
-        Start script
-        <Textarea
-          aria-label="Container start script"
-          rows={4}
-          value={startScript}
-          onChange={(event) => setStartScript(event.target.value)}
-          disabled={disabled}
-        />
-        <span className="text-xs text-muted-foreground">
-          A finite hook on each container start. It must exit successfully before T3 starts.
-          Background applications explicitly or use a guest terminal.
-        </span>
-      </label>
-      <label className="grid gap-2 text-sm">
-        Environment variables as JSON
-        <Textarea
-          aria-label="Container environment variables"
-          rows={4}
-          value={environment}
-          onChange={(event) => setEnvironment(event.target.value)}
-          disabled={disabled}
-        />
-        <span className="text-xs text-muted-foreground">
-          Plain non-secret values only. Host credentials and environment variables are not copied.
-          HOME, PATH, runtime flags, and T3 settings cannot be overridden.
-        </span>
-      </label>
-      <label className="grid gap-2 text-sm">
-        Stop after idle minutes
-        <Input
-          aria-label="Container idle stop minutes"
-          type="number"
-          min={1}
-          value={idle}
-          onChange={(event) => setIdle(event.target.value)}
-          disabled={disabled}
-        />
-        <span className="text-xs text-muted-foreground">
-          Leave blank to keep running. Cleanup requires an idle guest with no running turn,
-          terminal, pending effect, enabled schedule, or connected client. Unknown state is
-          retained.
-        </span>
-      </label>
-      <label className="grid gap-2 text-sm">
-        Remove runtime after inactive days
-        <Input
-          aria-label="Container runtime retention days"
-          type="number"
-          min={1}
-          value={retention}
-          onChange={(event) => setRetention(event.target.value)}
-          disabled={disabled}
-        />
-        <span className="text-xs text-muted-foreground">
-          Optional. Only managed runtimes are removed. Checkout files, guest home, credentials, and
-          conversation history are retained. There is no automatic data purge.
-        </span>
-      </label>
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
-      <Button disabled={disabled} onClick={() => void save()}>
-        Save container settings
-      </Button>
-    </div>
-  );
-}
-
-function ContainerSettingsForEnvironment({ environmentId }: { environmentId: EnvironmentId }) {
   const registry = use(RegistryContext);
   const navigate = useNavigate();
   const allowed = useAtomValue(
-    serverEnvironment.containers.configure.permissionAtom(environmentId),
+    serverEnvironment.containers.configureProject.permissionAtom(environmentId),
   );
   const [data, setData] = useState<ContainerSettings | null>(null);
   const [pending, setPending] = useState(false);
@@ -174,220 +68,393 @@ function ContainerSettingsForEnvironment({ environmentId }: { environmentId: Env
     const result = await runAtomCommand(
       registry,
       serverEnvironment.containers.settings,
-      { environmentId, input: {} },
+      { environmentId, input: projectId ? { projectId } : {} },
       { reportFailure: false },
     );
     if (signal?.aborted) return;
-    if (result._tag === "Success") {
-      setData(result.value);
-      setError(null);
-    } else setError(message(squashAtomCommandFailure(result)));
+    if (result._tag !== "Success") throw squashAtomCommandFailure(result);
+    if (projectId && result.value.project?.projectId !== projectId)
+      throw new Error("Update this host for project container settings.");
+    setData(result.value);
   });
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Load environment-owned container configuration when this host opens.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Load the concrete environment-local project selected by Settings scope.
   useEffect(() => {
-    const controller = new AbortController();
-    void load(controller.signal);
-    return () => controller.abort();
+    const abort = new AbortController();
+    void load(abort.signal).catch((cause) => {
+      if (!abort.signal.aborted) setError(message(cause));
+    });
+    return () => abort.abort();
   }, [load]);
-  const act = async (input: ContainerActionInput) => {
-    if (
-      input.action === "remove-runtime" &&
-      !(await ensureLocalApi().dialogs.confirm(
-        "Remove this managed container runtime? Guest home and conversation history are retained. Checkout files are not deleted.",
-        { variant: "destructive" },
-      ))
-    )
-      return;
+  const perform = async (work: () => Promise<void>) => {
+    if (pending) return;
     setPending(true);
     setError(null);
-    const result = await runAtomCommand(
-      registry,
-      serverEnvironment.containers.act,
-      { environmentId, input },
-      { reportFailure: false },
-    );
-    if (result._tag !== "Success") setError(message(squashAtomCommandFailure(result)));
-    else await load();
-    setPending(false);
-  };
-  const connect = async (workspace: ContainerSettings["workspaces"][number]) => {
-    setPending(true);
-    setError(null);
-    const opened = await runAtomCommand(
-      registry,
-      serverEnvironment.containers.open,
-      {
-        environmentId,
-        input: {
-          operationId: ContainerOperationId.make(newDraftId()),
-          projectId: workspace.projectId,
-          checkoutPath: workspace.checkoutPath,
-          selection: { type: "existing", workspaceId: workspace.id },
-        },
-      },
-      { reportFailure: false },
-    );
-    if (opened._tag !== "Success") setError(message(squashAtomCommandFailure(opened)));
-    else {
-      const connected = await runAtomCommand(
-        registry,
-        serverEnvironment.containers.connect,
-        opened.value,
-        { reportFailure: false },
-      );
-      if (connected._tag !== "Success") setError(message(squashAtomCommandFailure(connected)));
-      else
-        await navigate({
-          to: "/settings/providers",
-          search: { machine: opened.value.guestEnvironmentId },
-        });
+    try {
+      await work();
+      await load();
+    } catch (cause) {
+      setError(message(cause));
     }
     setPending(false);
   };
+  const saveSetup = async (value: ContainerSetup) => {
+    const result = projectId
+      ? await runAtomCommand(
+          registry,
+          serverEnvironment.containers.configureProject,
+          {
+            environmentId,
+            input: {
+              kind: "setup",
+              projectId,
+              expectedRevision: data?.project?.setup?.revision ?? null,
+              value,
+            },
+          },
+          { reportFailure: false },
+        )
+      : await runAtomCommand(
+          registry,
+          serverEnvironment.containers.configure,
+          {
+            environmentId,
+            input: { ...value, cleanup: data?.config.cleanup ?? DEFAULT_CONTAINER_CONFIG.cleanup },
+          },
+          { reportFailure: false },
+        );
+    if (result._tag !== "Success") throw squashAtomCommandFailure(result);
+  };
+  const policy = data?.project?.cleanup?.value ?? { kind: "inherit" as const };
+  const rules =
+    projectId && policy.kind === "off"
+      ? DEFAULT_CONTAINER_CONFIG.cleanup
+      : projectId && policy.kind === "custom"
+        ? policy.rules
+        : (data?.config.cleanup ?? DEFAULT_CONTAINER_CONFIG.cleanup);
+  const saveCleanup = async (value: ProjectContainerCleanup) => {
+    if (!data) return;
+    const result = projectId
+      ? await runAtomCommand(
+          registry,
+          serverEnvironment.containers.configureProject,
+          {
+            environmentId,
+            input: {
+              kind: "cleanup",
+              projectId,
+              expectedRevision: data.project?.cleanup?.revision ?? null,
+              value,
+            },
+          },
+          { reportFailure: false },
+        )
+      : await runAtomCommand(
+          registry,
+          serverEnvironment.containers.configure,
+          {
+            environmentId,
+            input: {
+              ...data.config,
+              cleanup: value.kind === "custom" ? value.rules : DEFAULT_CONTAINER_CONFIG.cleanup,
+            },
+          },
+          { reportFailure: false },
+        );
+    if (result._tag !== "Success") throw squashAtomCommandFailure(result);
+  };
+  const disabled = pending || !allowed || !data?.available;
   return (
-    <SettingsPageContainer>
-      <SettingsSection id="container-setup" title="Container workspaces">
-        <p className="text-sm text-muted-foreground">
-          A full T3 environment runs inside each container. Source files and Git metadata are shared
-          with the host. Provider installation and sign-in happen independently inside the guest.
-          Requires Docker and a matching Linux T3 runtime. Native mobile setup is not available yet.
+    <div className="space-y-6 rounded-lg border p-4">
+      <h3 className="font-medium">
+        {label} · {environmentId}
+      </h3>
+      {error ? (
+        <p role="alert" className="text-sm text-destructive">
+          {error} This target was not confirmed saved. Other targets are independent.
         </p>
-        {!allowed ? (
-          <p role="status" className="text-sm">
-            Full host maintenance access is required for all container operations and guest access.
-          </p>
-        ) : null}
-        {error ? (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        ) : null}
-        {data ? (
-          <ContainerConfigEditor
-            key={JSON.stringify(data.config)}
-            initial={data.config}
-            disabled={pending || !allowed}
-            onSave={async (config) => {
+      ) : null}
+      {!allowed ? (
+        <p className="text-sm text-muted-foreground">Full host maintenance access is required.</p>
+      ) : null}
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={pending}
+        onClick={() => void perform(async () => {})}
+      >
+        Refresh this target
+      </Button>
+      {data ? (
+        <>
+          <ContainerEnvironmentSetup
+            key={JSON.stringify(data.project?.setup ?? data.config)}
+            title={projectId ? "Project environment" : "Defaults for unconfirmed projects"}
+            initial={data.project?.setup?.value ?? data.config}
+            disabled={disabled}
+            onSave={async (value) => {
               setPending(true);
-              const result = await runAtomCommand(
-                registry,
-                serverEnvironment.containers.configure,
-                { environmentId, input: config },
-                { reportFailure: false },
-              );
-              if (result._tag !== "Success") {
+              try {
+                await saveSetup(value);
+                await load();
                 setPending(false);
-                throw squashAtomCommandFailure(result);
+              } catch (cause) {
+                setPending(false);
+                throw cause;
               }
-              await load();
-              setPending(false);
             }}
           />
-        ) : (
-          <p className="text-sm">Loading container settings…</p>
-        )}
-      </SettingsSection>
-      <SettingsSection id="container-runtimes" title="Managed containers">
-        <div className="flex gap-2">
           <Button
             size="sm"
             variant="outline"
-            disabled={pending || !allowed}
-            onClick={() => void load()}
+            disabled={disabled}
+            onClick={() =>
+              void perform(() => saveSetup(projectId ? data.config : DEFAULT_CONTAINER_CONFIG))
+            }
           >
-            Refresh
+            Reset setup to {projectId ? "host defaults" : "Ubuntu defaults"}
           </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={pending || !allowed}
-            onClick={() => {
-              setPending(true);
-              void runAtomCommand(
-                registry,
-                serverEnvironment.containers.cleanup,
-                { environmentId, input: undefined },
-                { reportFailure: false },
-              ).then(async (result) => {
-                if (result._tag !== "Success") setError(message(squashAtomCommandFailure(result)));
-                else await load();
-                setPending(false);
-              });
-            }}
-          >
-            Run idle cleanup
-          </Button>
-        </div>
-        {data?.workspaces.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Create a fresh Ubuntu container from an unsent draft's workspace menu. Existing managed
-            containers for that checkout can be reused there. Arbitrary external containers are
-            preserved and are not eligible.
-          </p>
-        ) : null}
-        <div className="space-y-4">
-          {data?.workspaces.map((workspace) => (
-            <div key={workspace.id} className="space-y-2 rounded-md border p-3">
-              <p className="break-all text-sm">{workspace.checkoutPath}</p>
-              <p className="text-xs text-muted-foreground">
-                {workspace.image} · {workspace.id.slice(0, 8)} · {workspace.status.type}
-              </p>
-              {workspace.status.type === "failed" ? (
-                <p role="alert" className="text-sm text-destructive">
-                  {workspace.status.error}
-                </p>
-              ) : null}
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={pending || !allowed}
-                  onClick={() => void connect(workspace)}
-                >
-                  Open guest setup
-                </Button>
-                {(["stop", "restart", "remove-runtime"] as const).map((action) => (
-                  <Button
-                    key={action}
-                    size="sm"
-                    variant={action === "remove-runtime" ? "destructive" : "outline"}
-                    disabled={pending || !allowed || workspace.ownership !== "managed"}
-                    onClick={() => void act({ workspaceId: workspace.id, action })}
+          <div className="space-y-2">
+            <SettingsRow
+              title="Container cleanup"
+              description="Only managed runtimes are stopped or removed. Source files, guest home, credentials and history stay. Unknown or busy guests are retained."
+              control={
+                projectId ? (
+                  <Select
+                    value={policy.kind}
+                    disabled={disabled}
+                    onValueChange={(kind) => {
+                      if (kind === "inherit" || kind === "off")
+                        void perform(() => saveCleanup({ kind }));
+                      else if (kind === "custom")
+                        void perform(() =>
+                          saveCleanup({
+                            kind,
+                            rules: writableRules(rules),
+                          }),
+                        );
+                    }}
                   >
-                    {action === "remove-runtime"
-                      ? "Remove runtime"
-                      : action === "restart"
-                        ? "Restart"
-                        : "Stop"}
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectPopup>
+                      <SelectItem value="inherit">Inherit</SelectItem>
+                      <SelectItem value="off">Off</SelectItem>
+                      <SelectItem value="custom">Custom</SelectItem>
+                    </SelectPopup>
+                  </Select>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={disabled}
+                    onClick={() => void perform(() => saveCleanup({ kind: "off" }))}
+                  >
+                    Reset cleanup
                   </Button>
-                ))}
+                )
+              }
+            />
+            {!validCleanup(rules) ? (
+              <p className="text-sm text-muted-foreground">
+                Legacy cleanup is outside supported limits. Automatic cleanup retains runtimes until
+                corrected.
+              </p>
+            ) : null}
+            <SettingsRow
+              title="Stop after idle"
+              description="Requires positive guest idle evidence and no connected route."
+              control={
+                <RetentionControl
+                  label="Container idle stop"
+                  value={rules.idleStopMinutes}
+                  maximum={CONTAINER_MAX_IDLE_MINUTES}
+                  unit="minutes"
+                  disabled={disabled || Boolean(projectId && policy.kind !== "custom")}
+                  onChange={(idleStopMinutes) =>
+                    void perform(() =>
+                      saveCleanup({
+                        kind: "custom",
+                        rules: writableRules({ ...rules, idleStopMinutes }),
+                      }),
+                    )
+                  }
+                />
+              }
+            />
+            <SettingsRow
+              title="Remove runtime after inactivity"
+              description="Reopen recreates the runtime using its retained setup and home. It does not delete a checkout or thread."
+              control={
+                <RetentionControl
+                  label="Container runtime retention"
+                  value={rules.removeAfterDays}
+                  maximum={CONTAINER_MAX_REMOVAL_DAYS}
+                  disabled={disabled || Boolean(projectId && policy.kind !== "custom")}
+                  onChange={(removeAfterDays) =>
+                    void perform(() =>
+                      saveCleanup({
+                        kind: "custom",
+                        rules: writableRules({ ...rules, removeAfterDays }),
+                      }),
+                    )
+                  }
+                />
+              }
+            />
+          </div>
+          <div className="space-y-3">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={disabled}
+              onClick={() =>
+                void perform(async () => {
+                  const result = await runAtomCommand(
+                    registry,
+                    serverEnvironment.containers.cleanup,
+                    { environmentId, input: undefined },
+                    { reportFailure: false },
+                  );
+                  if (result._tag !== "Success") throw squashAtomCommandFailure(result);
+                })
+              }
+            >
+              Run host idle cleanup
+            </Button>
+            {data.workspaces.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Select New container in an unsent draft, then Send. Managed containers for this
+                project appear directly in that menu.
+              </p>
+            ) : null}
+            {data.workspaces.map((workspace) => (
+              <div key={workspace.id} className="space-y-2 rounded-md border p-3">
+                <p className="break-all text-sm">{workspace.checkoutPath}</p>
+                <p className="text-xs text-muted-foreground">
+                  {workspace.image} · {workspace.id.slice(0, 8)} · {workspace.status.type}
+                </p>
+                {workspace.status.type === "failed" ? (
+                  <p role="alert" className="text-sm text-destructive">
+                    {workspace.status.error}
+                  </p>
+                ) : null}
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={disabled}
+                    onClick={() =>
+                      void perform(async () => {
+                        const opened = await runAtomCommand(
+                          registry,
+                          serverEnvironment.containers.open,
+                          {
+                            environmentId,
+                            input: {
+                              operationId: ContainerOperationId.make(newDraftId()),
+                              projectId: workspace.projectId,
+                              checkoutPath: workspace.checkoutPath,
+                              selection: { type: "existing", workspaceId: workspace.id },
+                            },
+                          },
+                          { reportFailure: false },
+                        );
+                        if (opened._tag !== "Success") throw squashAtomCommandFailure(opened);
+                        const connected = await runAtomCommand(
+                          registry,
+                          serverEnvironment.containers.connect,
+                          opened.value,
+                          { reportFailure: false },
+                        );
+                        if (connected._tag !== "Success") throw squashAtomCommandFailure(connected);
+                        await navigate({
+                          to: "/settings/providers",
+                          search: { machine: opened.value.guestEnvironmentId },
+                        });
+                      })
+                    }
+                  >
+                    Open guest setup
+                  </Button>
+                  {(["stop", "restart", "remove-runtime"] as const).map((action) => (
+                    <Button
+                      key={action}
+                      size="sm"
+                      variant={action === "remove-runtime" ? "destructive" : "outline"}
+                      disabled={disabled || workspace.ownership !== "managed"}
+                      onClick={() =>
+                        void perform(async () => {
+                          if (
+                            action === "remove-runtime" &&
+                            !(await ensureLocalApi().dialogs.confirm(
+                              "Remove this runtime? Guest home, history and checkout files are retained.",
+                              { variant: "destructive" },
+                            ))
+                          )
+                            return;
+                          const result = await runAtomCommand(
+                            registry,
+                            serverEnvironment.containers.act,
+                            { environmentId, input: { workspaceId: workspace.id, action } },
+                            { reportFailure: false },
+                          );
+                          if (result._tag !== "Success") throw squashAtomCommandFailure(result);
+                        })
+                      }
+                    >
+                      {action === "remove-runtime"
+                        ? "Remove runtime"
+                        : action === "restart"
+                          ? "Restart"
+                          : "Stop"}
+                    </Button>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-      </SettingsSection>
-    </SettingsPageContainer>
+            ))}
+          </div>
+        </>
+      ) : (
+        <p className="text-sm">
+          Container settings unavailable or loading. Refresh this target to retry.
+        </p>
+      )}
+    </div>
   );
 }
 
 export function ContainerSettingsPanel() {
-  const { environment } = useSettingsScope();
-  if (
-    !environment ||
-    environment.serverConfig?.environment.capabilities.containerWorkspaces !== true
-  )
-    return (
-      <SettingsPageContainer>
-        <p className="text-sm text-muted-foreground">
-          Choose a connected host that supports container workspaces. Container setup is not
-          available inside a guest.
-        </p>
-      </SettingsPageContainer>
-    );
+  const { scope, environments } = useSettingsScope();
+  const targets = containerSettingsTargets(scope);
   return (
-    <ContainerSettingsForEnvironment
-      key={environment.environmentId}
-      environmentId={environment.environmentId}
-    />
+    <SettingsPageContainer>
+      <SettingsSection id="container-setup" title="Container environments">
+        <p className="text-sm text-muted-foreground">
+          Setup belongs to each environment-local project. Checkout scope edits its owning project.
+          Each target below saves independently, including in aggregate scope. Native mobile
+          creation and setup are not supported.
+        </p>
+        {scope.kind === "unavailable" ? <p role="alert">{scope.message}</p> : null}
+        {targets.length === 0 ? (
+          <p className="text-sm">Choose a host or project to edit container setup.</p>
+        ) : null}
+        {targets.map((target) => {
+          const environment = environments.find(
+            (environment) => environment.environmentId === target.environmentId,
+          );
+          const key = `${target.environmentId}:${target.projectId ?? "host"}`;
+          return environment?.connection.phase === "connected" &&
+            environment.serverConfig?.environment.capabilities.containerProjects === true ? (
+            <ContainerSettingsForTarget key={key} {...target} />
+          ) : (
+            <p key={key} role="status" className="text-sm text-muted-foreground">
+              {target.label} · {target.environmentId} is offline, unsupported, or needs a host
+              update. No settings were saved there.
+            </p>
+          );
+        })}
+      </SettingsSection>
+    </SettingsPageContainer>
   );
 }
