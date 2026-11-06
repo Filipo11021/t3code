@@ -43,6 +43,12 @@ const firstLine = (value: string) =>
     .map((line) => line.trim())
     .find((line) => line.length > 0)
     ?.slice(0, DETAIL_LIMIT) ?? null;
+const lastLine = (value: string) =>
+  value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .findLast((line) => line.length > 0)
+    ?.slice(0, DETAIL_LIMIT) ?? null;
 
 export class ContainerEngine extends Context.Service<
   ContainerEngine,
@@ -99,7 +105,7 @@ const make = Effect.gen(function* () {
   ) {
     const result = yield* execute(runtime, "inspect", ["container", "inspect", name]);
     if (result.code !== 0) {
-      yield* run(runtime, "engine", ["info", "--format", "{{.ServerVersion}}"]);
+      yield* run(runtime, "engine", ["info"]);
       return null;
     }
     const values = yield* decodeInspections(result.stdout).pipe(
@@ -131,8 +137,8 @@ const make = Effect.gen(function* () {
       info.success.code === 0;
     const detail = available
       ? null
-      : ((info._tag === "Success" ? firstLine(info.success.stderr) : null) ??
-        (version._tag === "Success" ? firstLine(version.success.stderr) : null) ??
+      : ((info._tag === "Success" ? lastLine(info.success.stderr) : null) ??
+        (version._tag === "Success" ? lastLine(version.success.stderr) : null) ??
         `${CONTAINER_RUNTIME_LABELS[runtime]} is not installed or is not responding.`);
     const result: ContainerRuntimeStatus = {
       runtime,

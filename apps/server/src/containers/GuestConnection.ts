@@ -60,6 +60,9 @@ const make = Effect.gen(function* () {
   const watched = new Set<string>();
   const serviceScope = yield* Scope.Scope;
   const origin = Effect.fn("GuestConnection.origin")(function* (record: WorkspaceRecord) {
+    const runtimeStatus = yield* engine.status(record.runtime);
+    if (!runtimeStatus.available)
+      return yield* new ContainerError({ stage: "runtime", reason: "runtime-unavailable" });
     const inspected = yield* engine.inspect(record.runtime, containerName(record.id));
     const labels = inspected?.Config.Labels;
     if (

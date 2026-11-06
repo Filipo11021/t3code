@@ -88,7 +88,10 @@ function ContainerRuntimeSection() {
       projectId: projectIds.length === 1 ? (projectIds[0] ?? null) : null,
     };
   });
-  const overview = useContainerRuntimeOverview({ targets });
+  const overview = useContainerRuntimeOverview({
+    targets,
+    revisionKey: settings.containerRuntime,
+  });
   const statusFor = (runtime: ContainerRuntimeKind) => {
     const statuses = [...overview.entries.values()].flatMap((entry) => {
       const status = entry.runtimes.find((candidate) => candidate.runtime === runtime);
@@ -130,7 +133,7 @@ function ContainerRuntimeSection() {
               updateSettings({ containerRuntime: value as ContainerRuntimeKind })
             }
           >
-            <SelectTrigger>
+            <SelectTrigger aria-label="Default container runtime">
               <SelectValue>{containerRuntimeLabel(settings.containerRuntime)}</SelectValue>
             </SelectTrigger>
             <SelectPopup>
@@ -556,7 +559,9 @@ function ContainerSettingsForTarget({
                     control={
                       <Select
                         value={workspace.runtime}
-                        disabled={disabled || workspace.ownership !== "managed"}
+                        disabled={
+                          disabled || workspace.ownership !== "managed" || !otherRuntimeAvailable
+                        }
                         onValueChange={(value) => {
                           const runtime = value as ContainerRuntimeKind;
                           if (runtime === workspace.runtime) return;
@@ -583,7 +588,7 @@ function ContainerSettingsForTarget({
                           })();
                         }}
                       >
-                        <SelectTrigger>
+                        <SelectTrigger aria-label="Container runtime">
                           <SelectValue>{currentRuntime}</SelectValue>
                         </SelectTrigger>
                         <SelectPopup>

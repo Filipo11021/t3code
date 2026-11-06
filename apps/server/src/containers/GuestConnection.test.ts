@@ -53,6 +53,14 @@ it.effect("waits for long setup hooks after session issuance and bounds total re
                 legacyCookieName: undefined,
               }),
               Layer.mock(Engine.ContainerEngine)({
+                status: (runtime) =>
+                  Effect.succeed({
+                    runtime,
+                    available: true,
+                    version: "test",
+                    detail: null,
+                    checkedAt: 0,
+                  }),
                 inspect: (runtime, name) =>
                   Effect.sync(() => {
                     expect(runtime).toBe("docker");

@@ -597,6 +597,7 @@ const make = Effect.gen(function* () {
       }
       if (!inspected.success) continue;
       if (
+        inspected.success.Id !== entry.containerId ||
         inspected.success.Config.Labels?.["codes.t3.owner"] !== owner ||
         inspected.success.Config.Labels["codes.t3.workspace"] !== record.id
       )

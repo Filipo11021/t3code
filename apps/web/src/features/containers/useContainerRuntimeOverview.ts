@@ -37,15 +37,22 @@ const message = (cause: unknown) =>
 
 export function useContainerRuntimeOverview(input: {
   readonly targets: ReadonlyArray<ContainerRuntimeOverviewTarget>;
+  readonly revisionKey?: string;
 }) {
   const registry = use(RegistryContext);
-  const key = JSON.stringify(input.targets);
+  const targetsKey = JSON.stringify(input.targets);
+  const key = `${targetsKey}:${input.revisionKey ?? ""}`;
   const [state, setState] = useState<OverviewState>(emptyState(key));
   const load = useStableCallback(
-    async (targetsKey: string, refreshRuntimes: boolean, signal?: AbortSignal) => {
+    async (
+      targetsKey: string,
+      stateKey: string,
+      refreshRuntimes: boolean,
+      signal?: AbortSignal,
+    ) => {
       const targets = JSON.parse(targetsKey) as ReadonlyArray<ContainerRuntimeOverviewTarget>;
       setState((current) => ({
-        ...(current.key === targetsKey ? current : emptyState(targetsKey)),
+        ...(current.key === stateKey ? current : emptyState(stateKey)),
         pending: true,
       }));
       const results = await Promise.all(
@@ -87,20 +94,20 @@ export function useContainerRuntimeOverview(input: {
         if ("error" in result) errors.set(result.target.environmentId, result.error);
         else entries.set(result.target.environmentId, result.entry);
       }
-      setState({ key: targetsKey, entries, errors, pending: false });
+      setState({ key: stateKey, entries, errors, pending: false });
     },
   );
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Probe each selected environment's runtime availability from Settings.
   useEffect(() => {
     const abort = new AbortController();
-    void load(key, false, abort.signal);
+    void load(targetsKey, key, false, abort.signal);
     return () => abort.abort();
-  }, [load, key]);
+  }, [load, targetsKey, key]);
   const current = state.key === key ? state : emptyState(key);
   return {
     entries: current.entries,
     errors: current.errors,
     pending: current.pending,
-    refresh: () => void load(key, true),
+    refresh: () => void load(targetsKey, key, true),
   };
 }
