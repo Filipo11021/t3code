@@ -18,6 +18,7 @@ import {
   type ContainerSettings,
   type ContainerWorkspace,
   type OpenContainerInput,
+  type WakeContainerInput,
 } from "@t3tools/contracts";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -68,7 +69,12 @@ export class ContainerWorkspaces extends Context.Service<
     ) => Effect.Effect<typeof ContainerConfigurationRevision.Type, ContainerError>;
     readonly act: (
       input: ContainerActionInput,
+      options?: { readonly automatic?: boolean; readonly ignoreLeases?: boolean },
     ) => Effect.Effect<ContainerWorkspace, ContainerError>;
+    readonly wake: (
+      input: WakeContainerInput,
+    ) => Effect.Effect<ContainerDestination, ContainerError>;
+    readonly idle: Effect.Effect<void, ContainerError>;
     readonly changeRuntime: (
       input: ChangeContainerRuntimeInput,
     ) => Effect.Effect<ContainerDestination, ContainerError>;
@@ -435,7 +441,7 @@ const make = Effect.gen(function* () {
   });
   const act = Effect.fn("ContainerWorkspaces.act")(function* (
     input: ContainerActionInput,
-    automatic = false,
+    options?: { readonly automatic?: boolean; readonly ignoreLeases?: boolean },
   ) {
     yield* guard;
     return yield* locks.withLock(
@@ -445,7 +451,11 @@ const make = Effect.gen(function* () {
         if (record.ownership !== "managed") return yield* fail(input.action, "not-owned");
         const runtimeStatus = yield* engine.status(record.runtime);
         if (!runtimeStatus.available) return yield* fail(input.action, "runtime-unavailable");
-        if (automatic && (leases.has(record.id) || !(yield* cleanupEligible(record, input.action))))
+        if (
+          options?.automatic &&
+          ((options.ignoreLeases !== true && leases.has(record.id)) ||
+            !(yield* cleanupEligible(record, input.action, options)))
+        )
           return asWorkspace(record);
         blocked.add(record.id);
         return yield* Effect.gen(function* () {
@@ -467,7 +477,7 @@ const make = Effect.gen(function* () {
               return yield* fail("identity", "incompatible");
             if (inspected.State.Running) {
               if (!(yield* guests.idle(record))) return yield* fail("idle", "busy");
-              if (automatic && !(yield* cleanupEligible(record, input.action)))
+              if (options?.automatic && !(yield* cleanupEligible(record, input.action, options)))
                 return asWorkspace(record);
               yield* engine.run(record.runtime, "stop", [
                 "stop",
@@ -476,7 +486,7 @@ const make = Effect.gen(function* () {
                 GuestConnection.containerName(record.id),
               ]);
             }
-            if (automatic && !(yield* cleanupEligible(record, input.action)))
+            if (options?.automatic && !(yield* cleanupEligible(record, input.action, options)))
               return asWorkspace(record);
             if (input.action === "remove-runtime")
               yield* engine.run(record.runtime, "remove", [
@@ -499,6 +509,17 @@ const make = Effect.gen(function* () {
           }
           return asWorkspace(record);
         }).pipe(Effect.ensuring(Effect.sync(() => blocked.delete(record.id))));
+      }),
+    );
+  });
+  const wake = Effect.fn("ContainerWorkspaces.wake")(function* (input: WakeContainerInput) {
+    yield* guard;
+    return yield* locks.withLock(
+      input.workspaceId,
+      Effect.gen(function* () {
+        const record = yield* find(input.workspaceId);
+        if (record.ownership !== "managed") return yield* fail("wake", "not-owned");
+        return yield* ensure(record, { preserveInstallMarker: true });
       }),
     );
   });
@@ -736,29 +757,37 @@ const make = Effect.gen(function* () {
       }),
     );
   });
-  const cleanupEligible = Effect.fn("ContainerWorkspaces.cleanupEligible")(function* (
+  const cleanupRulesFor = Effect.fn("ContainerWorkspaces.cleanupRulesFor")(function* (
     record: WorkspaceRecord,
-    action: ContainerActionInput["action"],
   ) {
     const project = yield* projects.getById(record.projectId).pipe(Effect.result);
     if (
       project._tag === "Failure" ||
       Option.isNone(project.success) ||
-      project.success.value.deletedAt !== null ||
-      leases.has(record.id)
+      project.success.value.deletedAt !== null
     )
-      return false;
+      return null;
     const override = yield* registry.projectCleanup(record.projectId).pipe(Effect.result);
-    if (override._tag === "Failure") return false;
+    if (override._tag === "Failure") return null;
     const policy = override.success;
-    if (policy?.value.kind === "off") return false;
+    if (policy?.value.kind === "off") return null;
     const host = yield* registry.config.pipe(Effect.result);
-    if (host._tag === "Failure") return false;
-    const rules =
+    if (host._tag === "Failure") return null;
+    const rules: ContainerCleanupRules =
       policy?.value.kind === "custom"
         ? policy.value.rules
         : (host.success ?? DEFAULT_CONTAINER_CONFIG).cleanup;
-    if (!validCleanup(rules)) return false;
+    if (!validCleanup(rules)) return null;
+    return rules;
+  });
+  const cleanupEligible = Effect.fn("ContainerWorkspaces.cleanupEligible")(function* (
+    record: WorkspaceRecord,
+    action: ContainerActionInput["action"],
+    options?: { readonly ignoreLeases?: boolean },
+  ) {
+    if (options?.ignoreLeases !== true && leases.has(record.id)) return false;
+    const rules = yield* cleanupRulesFor(record);
+    if (rules === null) return false;
     const retention = action === "remove-runtime" ? rules.removeAfterDays : rules.idleStopMinutes;
     if (retention === null) return false;
     return (
@@ -784,16 +813,40 @@ const make = Effect.gen(function* () {
       ) {
         yield* act(
           { workspaceId: record.id, action: remove ? "remove-runtime" : "stop" },
-          true,
+          { automatic: true },
         ).pipe(Effect.ignore);
       }
     }
   });
+  const idle = Effect.gen(function* () {
+    yield* guard;
+    for (const record of yield* registry.list) {
+      if (record.ownership !== "managed" || record.ownerEnvironmentId !== owner) continue;
+      if (record.status.type !== "ready") continue;
+      const rules = yield* cleanupRulesFor(record);
+      if (rules === null || rules.idleStopMinutes === null) continue;
+      const now = yield* Clock.currentTimeMillis;
+      const guestIdle = yield* guests.idle(record).pipe(Effect.orElseSucceed(() => false));
+      if (!guestIdle) {
+        if (now - record.lastUsedAt >= 60_000) yield* registry.save({ ...record, lastUsedAt: now });
+        continue;
+      }
+      if (now - record.lastUsedAt < rules.idleStopMinutes * 60_000) continue;
+      yield* act(
+        { workspaceId: record.id, action: "stop" },
+        { automatic: true, ignoreLeases: true },
+      ).pipe(Effect.ignore);
+    }
+  });
   if (guestMode !== "1")
     yield* forkParked(cleanup.pipe(Effect.ignore, Effect.repeat(Schedule.spaced("5 minutes"))));
+  if (guestMode !== "1")
+    yield* forkParked(idle.pipe(Effect.ignore, Effect.repeat(Schedule.spaced("30 seconds"))));
   return ContainerWorkspaces.of({
     open,
     act,
+    wake,
+    idle,
     changeRuntime,
     settings,
     configure,

@@ -26,6 +26,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.containersAct]: AuthEnvironmentMaintainScope,
   [WS_METHODS.containersCleanup]: AuthEnvironmentMaintainScope,
   [WS_METHODS.containersChangeRuntime]: AuthEnvironmentMaintainScope,
+  [WS_METHODS.containersWake]: AuthEnvironmentMaintainScope,
   [WS_METHODS.previewClose]: AuthPreviewOperateScope,
   // Stopping a server signals its processes, as closing a terminal does.
   [WS_METHODS.previewStopLocalServer]: AuthTerminalOperateScope,

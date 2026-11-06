@@ -4,11 +4,14 @@ import {
   DEFAULT_CONTAINER_CONFIG,
   EnvironmentId,
   ProjectId,
+  type ContainerDestination,
   type ContainerRuntimeStatus,
   type ContainerSettings,
+  type ContainerStatus,
   type ContainerWorkspace,
 } from "@t3tools/contracts";
 import {
+  containerActivityLabel,
   containerOptions,
   containerRuntimeLabel,
   containerRuntimeStatus,
@@ -30,6 +33,15 @@ const unavailable = (runtime: "docker" | "podman"): ContainerRuntimeStatus => ({
   detail: "not installed",
   checkedAt: 0,
 });
+const destination: ContainerDestination = {
+  hostEnvironmentId: EnvironmentId.make("host"),
+  workspaceId: ContainerWorkspaceId.make("workspace-one"),
+  guestEnvironmentId: EnvironmentId.make("guest"),
+  guestProjectId: ProjectId.make("guest-project"),
+  guestCheckoutPath: "/repo/t3code",
+  runtime: "docker",
+  label: "t3code · ubuntu:26.04",
+};
 const workspace = (overrides: Partial<ContainerWorkspace> = {}): ContainerWorkspace => ({
   id: ContainerWorkspaceId.make("workspace-one"),
   ownership: "managed",
@@ -63,11 +75,35 @@ describe("container runtime labels", () => {
   });
 });
 
+describe("containerActivityLabel", () => {
+  it.each([
+    {
+      name: "provisioning",
+      status: { type: "provisioning", stage: "create" },
+      label: "Starting",
+    },
+    { name: "ready", status: { type: "ready", destination }, label: "Active" },
+    { name: "stopped", status: { type: "stopped" }, label: "Idle" },
+    { name: "removed", status: { type: "removed", retainedData: true }, label: "Idle" },
+    {
+      name: "failed",
+      status: { type: "failed", stage: "start", error: "boom" },
+      label: "Failed",
+    },
+  ] satisfies ReadonlyArray<{
+    readonly name: string;
+    readonly status: ContainerStatus;
+    readonly label: string;
+  }>)("maps $name to $label", ({ status, label }) => {
+    expect(containerActivityLabel(status)).toBe(label);
+  });
+});
+
 describe("containerOptions", () => {
-  it("labels a new container with the resolved runtime", () => {
+  it("labels a new container without runtime noise", () => {
     expect(containerOptions(settings())[0]).toEqual({
       value: "container:fresh",
-      label: "New container · Docker",
+      label: "New container",
     });
     expect(
       containerOptions(
@@ -76,30 +112,56 @@ describe("containerOptions", () => {
           runtimes: [unavailable("docker"), unavailable("podman")],
         }),
       )[0],
-    ).toEqual({ value: "container:fresh", label: "New container · Podman (unavailable)" });
+    ).toEqual({ value: "container:fresh", label: "New container" });
+    expect(containerOptions(null)[0]).toEqual({ value: "container:fresh", label: "New container" });
   });
 
-  it("shows the recorded runtime and warns when it is unavailable", () => {
-    expect(
-      containerOptions(
-        settings({
-          workspaces: [
-            workspace({ id: ContainerWorkspaceId.make("abcdefgh-one") }),
-            workspace({ id: ContainerWorkspaceId.make("ijklmnop-two"), runtime: "podman" }),
-          ],
-          runtimes: [available("docker"), unavailable("podman")],
-        }),
-      ),
-    ).toEqual([
-      { value: "container:fresh", label: "New container · Docker" },
-      {
-        value: "container:abcdefgh-one",
-        label: "abcdefgh · t3code · Docker · stopped",
-      },
-      {
-        value: "container:ijklmnop-two",
-        label: "ijklmnop · t3code · Podman (unavailable) · stopped",
-      },
+  it("shows activity instead of runtime, availability, raw status or id", () => {
+    const options = containerOptions(
+      settings({
+        workspaces: [
+          workspace({
+            id: ContainerWorkspaceId.make("abcdefgh-one"),
+            status: { type: "ready", destination },
+            lastUsedAt: 2,
+          }),
+          workspace({
+            id: ContainerWorkspaceId.make("ijklmnop-two"),
+            checkoutPath: "/repo/other",
+            runtime: "podman",
+            lastUsedAt: 1,
+          }),
+        ],
+        runtimes: [available("docker"), unavailable("podman")],
+      }),
+    );
+    expect(options).toEqual([
+      { value: "container:fresh", label: "New container" },
+      { value: "container:abcdefgh-one", label: "t3code · Active" },
+      { value: "container:ijklmnop-two", label: "other · Idle" },
+    ]);
+    for (const option of options.slice(1)) {
+      expect(option.label).not.toContain("Docker");
+      expect(option.label).not.toContain("Podman");
+      expect(option.label).not.toContain("stopped");
+      expect(option.label).not.toContain("abcdefgh");
+      expect(option.label).not.toContain("ijklmnop");
+    }
+  });
+
+  it("disambiguates duplicate checkout labels with the workspace id", () => {
+    const options = containerOptions(
+      settings({
+        workspaces: [
+          workspace({ id: ContainerWorkspaceId.make("abcdefgh-one"), lastUsedAt: 2 }),
+          workspace({ id: ContainerWorkspaceId.make("ijklmnop-two"), lastUsedAt: 1 }),
+        ],
+      }),
+    );
+    expect(options.map((option) => option.label)).toEqual([
+      "New container",
+      "t3code · Idle · abcdefgh",
+      "t3code · Idle · ijklmnop",
     ]);
   });
 });

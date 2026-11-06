@@ -43,6 +43,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.containersAct]: "containers",
   [WS_METHODS.containersCleanup]: "containers",
   [WS_METHODS.containersChangeRuntime]: "containers",
+  [WS_METHODS.containersWake]: "containers",
   [WS_METHODS.serverGetNpmRelease]: "server",
   [WS_METHODS.serverRefreshProviders]: "server",
   [WS_METHODS.serverUpdateProvider]: "server",

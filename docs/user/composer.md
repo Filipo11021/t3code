@@ -386,11 +386,13 @@ Android opens a compatible installed file viewer.
 ## Container workspaces
 
 On web and desktop, choose **New container** or a managed container directly in an unsent
-draft's workspace menu, then Send. Selection does not provision anything. First Send asks
-you to confirm the project's environment. **Save and continue** saves it and sends the
-preserved prompt only inside the guest. Later new containers reuse that setup, including
-intentionally empty scripts. The default image is `ubuntu:26.04`. Existing containers keep
-their recorded checkout and setup. T3 does not manage arbitrary external containers.
+draft's workspace menu, then Send. **New container** creates one container for that thread.
+Existing containers stay selectable and show **Active** or **Idle** instead of their runtime
+or raw status. Selection does not provision anything. First Send asks you to confirm the
+project's environment. **Save and continue** saves it and sends the preserved prompt only
+inside the guest. Later new containers reuse that setup, including intentionally empty
+scripts. The default image is `ubuntu:26.04`. Existing containers keep their recorded
+checkout and setup. T3 does not manage arbitrary external containers.
 
 Source files and Git metadata remain shared with the host. Processes, home, provider
 sign-in and conversation history belong to the guest. Set up your provider inside that
@@ -403,17 +405,21 @@ issued message. Use the guest thread's Stop action for a committed run.
 Use **Settings > Containers** with project scope to edit setup and choose Inherit, Off or
 Custom cleanup. Host scope edits defaults. Aggregate scope shows each concrete target and
 saves each independently. Setup edits affect new containers. Cleanup uses current policy
-for existing runtimes. The install script retries until successful and runs again when a
+for existing runtimes. A managed container idles after its guest reports no running work for
+the configured window, two minutes by default. **Settings > Containers > Container cleanup >
+Idle after** changes that window; turn the switch off to keep containers running. A stopped
+container wakes from the thread's **Wake container** action or when you open it from the
+workspace menu. The install script retries until successful and runs again when a
 removed runtime is recreated. The finite start script must finish before T3 is ready.
 Runtime removal keeps source files, guest home and history. Busy, unknown and unreachable
-guests are retained. Schedules do not wake a stopped container.
+guests are retained. Schedules do not wake an idle container.
 
 Docker and Podman are container runtime providers. **Settings > Containers** shows whether
 each is installed and responding on the host. The environment default selects the runtime
 for new containers, and a project can override it. Existing containers keep their recorded
-runtime, shown in the workspace menu and card. If that runtime is unavailable, start it or
-change the container to an available runtime. A runtime change recreates the container on
-the other provider and keeps the checkout, guest home, installed packages and threads. If
+runtime, shown in Settings and on the workspace card. If that runtime is unavailable, start
+it or change the container to an available runtime. A runtime change recreates the container
+on the other provider and keeps the checkout, guest home, installed packages and threads. If
 the old runtime cannot be reached when you change, T3 removes its container later when that
 runtime is available again.
 

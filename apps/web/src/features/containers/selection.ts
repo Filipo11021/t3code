@@ -3,6 +3,7 @@ import {
   type ContainerRuntimeKind,
   type ContainerRuntimeStatus,
   type ContainerSettings,
+  type ContainerStatus,
 } from "@t3tools/contracts";
 import type { ResolvedSettingsScope } from "../../components/settings/settingsScope";
 
@@ -16,26 +17,41 @@ export function containerRuntimeStatus(
 ): ContainerRuntimeStatus | null {
   return settings?.runtimes.find((status) => status.runtime === runtime) ?? null;
 }
-function runtimeLabel(settings: ContainerSettings | null, runtime: ContainerRuntimeKind) {
-  const status = settings ? containerRuntimeStatus(settings, runtime) : null;
-  return `${containerRuntimeLabel(runtime)}${status && !status.available ? " (unavailable)" : ""}`;
+export function containerActivityLabel(
+  status: ContainerStatus,
+): "Starting" | "Active" | "Idle" | "Failed" {
+  switch (status.type) {
+    case "provisioning":
+      return "Starting";
+    case "ready":
+      return "Active";
+    case "stopped":
+    case "removed":
+      return "Idle";
+    case "failed":
+      return "Failed";
+  }
 }
 export function containerOptions(
   settings: ContainerSettings | null,
 ): ReadonlyArray<ContainerPickerOption> {
+  const workspaces = [...(settings?.workspaces ?? [])]
+    .filter((workspace) => workspace.ownership === "managed")
+    .sort((left, right) => right.lastUsedAt - left.lastUsedAt);
+  const checkoutLabels = workspaces.map((workspace) => checkoutLabel(workspace.checkoutPath));
+  const duplicated = new Set(
+    checkoutLabels.filter((label, index) => checkoutLabels.indexOf(label) !== index),
+  );
   return [
-    {
-      value: "container:fresh",
-      label: settings
-        ? `New container · ${runtimeLabel(settings, settings.runtime.resolved)}`
-        : "New container",
-    },
-    ...(settings?.workspaces ?? [])
-      .filter((workspace) => workspace.ownership === "managed")
-      .map((workspace) => ({
+    { value: "container:fresh", label: "New container" },
+    ...workspaces.map((workspace, index) => {
+      const label = checkoutLabels[index]!;
+      const suffix = duplicated.has(label) ? ` · ${workspace.id.slice(0, 8)}` : "";
+      return {
         value: `container:${workspace.id}`,
-        label: `${workspace.id.slice(0, 8)} · ${checkoutLabel(workspace.checkoutPath)} · ${runtimeLabel(settings, workspace.runtime)} · ${workspace.status.type === "failed" || workspace.status.type === "provisioning" ? `retry ${workspace.status.type}` : workspace.status.type}`,
-      })),
+        label: `${label} · ${containerActivityLabel(workspace.status)}${suffix}`,
+      };
+    }),
   ];
 }
 export function containerSettingsTargets(scope: ResolvedSettingsScope) {

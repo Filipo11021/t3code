@@ -91,5 +91,9 @@ export function createContainerCommands<R, E>(
       label: "containers:change-runtime",
       tag: WS_METHODS.containersChangeRuntime,
     }),
+    wake: createEnvironmentRpcCommand(runtime, {
+      label: "containers:wake",
+      tag: WS_METHODS.containersWake,
+    }),
   };
 }

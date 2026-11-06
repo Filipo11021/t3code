@@ -6,6 +6,7 @@ import {
   ContainerCleanupRules,
   ContainerOperationId,
   DEFAULT_CONTAINER_CONFIG,
+  DEFAULT_CONTAINER_IDLE_MINUTES,
   CONTAINER_MAX_IDLE_MINUTES,
   CONTAINER_MAX_REMOVAL_DAYS,
   type ContainerRuntimeKind,
@@ -44,6 +45,7 @@ import { newDraftId } from "../../lib/utils";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { ContainerEnvironmentSetup } from "./ContainerEnvironmentSetup";
 import {
+  containerActivityLabel,
   containerRuntimeLabel,
   containerRuntimeStatus,
   containerSettingsTargets,
@@ -458,14 +460,15 @@ function ContainerSettingsForTarget({
               </p>
             ) : null}
             <SettingsRow
-              title="Stop after idle"
-              description="Requires positive guest idle evidence and no connected route."
+              title="Idle after"
+              description="Stop this container after its guest reports no running work for this long. Wake it from its thread to continue."
               control={
                 <RetentionControl
                   label="Container idle stop"
                   value={rules.idleStopMinutes}
                   maximum={CONTAINER_MAX_IDLE_MINUTES}
                   unit="minutes"
+                  enabledValue={DEFAULT_CONTAINER_IDLE_MINUTES}
                   disabled={disabled || Boolean(projectId && policy.kind !== "custom")}
                   onChange={(idleStopMinutes) =>
                     void perform(() =>
@@ -539,8 +542,7 @@ function ContainerSettingsForTarget({
                   <p className="break-all text-sm">{workspace.checkoutPath}</p>
                   <p className="text-xs text-muted-foreground">
                     {workspace.image} · {currentRuntime} ·{" "}
-                    {runtimeUnavailable ? "unavailable" : "available"} · {workspace.id.slice(0, 8)}{" "}
-                    · {workspace.status.type}
+                    {containerActivityLabel(workspace.status)}
                   </p>
                   {runtimeUnavailable ? (
                     <p role="alert" className="text-sm text-destructive">

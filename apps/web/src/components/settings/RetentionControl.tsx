@@ -15,6 +15,7 @@ export function RetentionControl({
   minimum = 1,
   maximum = 3650,
   unit = "days",
+  enabledValue = 8,
   disabled = false,
 }: {
   label: string;
@@ -23,6 +24,7 @@ export function RetentionControl({
   minimum?: number;
   maximum?: number;
   unit?: "days" | "minutes";
+  enabledValue?: number;
   disabled?: boolean;
 }) {
   const [draft, setDraft] = useState(value);
@@ -72,7 +74,7 @@ export function RetentionControl({
         aria-label={label}
         checked={value !== null}
         disabled={disabled}
-        onCheckedChange={(enabled) => onChange(enabled ? 8 : null)}
+        onCheckedChange={(enabled) => onChange(enabled ? enabledValue : null)}
       />
     </div>
   );

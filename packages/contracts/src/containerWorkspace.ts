@@ -59,6 +59,7 @@ export const ContainerConfig = Schema.Struct({
 export type ContainerConfig = typeof ContainerConfig.Type;
 export const CONTAINER_MAX_REMOVAL_DAYS = 3650;
 export const CONTAINER_MAX_IDLE_MINUTES = 525600;
+export const DEFAULT_CONTAINER_IDLE_MINUTES = 2;
 const boundedRetention = (maximum: number) =>
   Schema.NullOr(Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 1, maximum }))));
 export const ContainerCleanupRules = Schema.Struct({
@@ -109,7 +110,7 @@ export const DEFAULT_CONTAINER_CONFIG: ContainerConfig = {
   installScript: "",
   startScript: "",
   environment: {},
-  cleanup: { idleStopMinutes: null, removeAfterDays: null },
+  cleanup: { idleStopMinutes: DEFAULT_CONTAINER_IDLE_MINUTES, removeAfterDays: null },
 };
 
 export const ContainerSelection = Schema.Union([
@@ -169,6 +170,10 @@ export const ChangeContainerRuntimeInput = Schema.Struct({
   runtime: ContainerRuntimeKind,
 });
 export type ChangeContainerRuntimeInput = typeof ChangeContainerRuntimeInput.Type;
+export const WakeContainerInput = Schema.Struct({
+  workspaceId: ContainerWorkspaceId,
+});
+export type WakeContainerInput = typeof WakeContainerInput.Type;
 export const ContainerSettings = Schema.Struct({
   config: ContainerConfig,
   runtime: Schema.Struct({

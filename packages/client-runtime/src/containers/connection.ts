@@ -60,7 +60,7 @@ export const prepareContainerConnection = Effect.fn("containers.prepareConnectio
         return yield* new ConnectionBlockedError({
           reason: response.status === 403 ? "permission" : "configuration",
           detail:
-            "The container is stopped or this host connection lacks full maintenance authority. Open it from the host workspace menu.",
+            "The container is idle or could not start. Wake it from its thread or open it from the host workspace menu.",
         });
       return yield* decodeDescriptor(yield* response.json);
     }),

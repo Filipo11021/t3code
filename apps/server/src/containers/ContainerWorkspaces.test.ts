@@ -12,6 +12,7 @@ import {
   type Project,
 } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
@@ -378,6 +379,81 @@ it.effect(
       expect(f.objects.size).toBe(1);
       expect(f.commands.filter((args) => args[0] === "stop")).toHaveLength(0);
     }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+);
+
+it.effect(
+  "idles a quiet container after the default window and wakes it without creating another",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* confirmedFixture;
+      const destination = yield* f.service.open(f.input);
+      const record = (yield* f.registry.list)[0]!;
+      const now = yield* Clock.currentTimeMillis;
+      yield* f.registry.save({ ...record, lastUsedAt: now - 2 * 60_000 });
+      yield* f.service.idle;
+      expect((yield* f.registry.list)[0]?.status.type).toBe("stopped");
+      expect(f.commands.filter((args) => args[0] === "stop")).toHaveLength(1);
+      const woken = yield* f.service.wake({ workspaceId: destination.workspaceId });
+      expect(woken).toEqual(destination);
+      expect((yield* f.registry.list)[0]?.status.type).toBe("ready");
+      expect(f.commands.filter((args) => args[0] === "create")).toHaveLength(1);
+      expect(f.commands.filter((args) => args[0] === "start")).toHaveLength(2);
+    }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+);
+
+it.effect("keeps a busy guest running during the idle pass", () =>
+  Effect.gen(function* () {
+    const f = yield* confirmedFixture;
+    yield* f.service.open(f.input);
+    const record = (yield* f.registry.list)[0]!;
+    const now = yield* Clock.currentTimeMillis;
+    yield* f.registry.save({ ...record, lastUsedAt: now - 10 * 60_000 });
+    f.busy(true);
+    yield* f.service.idle;
+    expect((yield* f.registry.list)[0]?.status.type).toBe("ready");
+    expect(f.commands.filter((args) => args[0] === "stop")).toHaveLength(0);
+    f.busy(false);
+  }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+);
+
+it.effect("stops an idle container through an open route lease after draining it", () =>
+  Effect.gen(function* () {
+    const f = yield* confirmedFixture;
+    const destination = yield* f.service.open(f.input);
+    const leaseScope = yield* Scope.make();
+    const route = yield* f.service
+      .route(destination.workspaceId)
+      .pipe(Effect.provideService(Scope.Scope, leaseScope));
+    const record = (yield* f.registry.list)[0]!;
+    const now = yield* Clock.currentTimeMillis;
+    yield* f.registry.save({ ...record, lastUsedAt: now - 10 * 60_000 });
+    const closed = yield* route.closed.pipe(Effect.forkChild());
+    const idling = yield* f.service.idle.pipe(Effect.forkChild());
+    yield* Fiber.join(closed);
+    yield* Scope.close(leaseScope, Exit.void);
+    yield* Fiber.join(idling);
+    expect((yield* f.registry.list)[0]?.status.type).toBe("stopped");
+    expect(f.commands.filter((args) => args[0] === "stop")).toHaveLength(1);
+  }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+);
+
+it.effect("keeps containers running while project cleanup is off", () =>
+  Effect.gen(function* () {
+    const f = yield* confirmedFixture;
+    yield* f.service.open(f.input);
+    const record = (yield* f.registry.list)[0]!;
+    const now = yield* Clock.currentTimeMillis;
+    yield* f.registry.save({ ...record, lastUsedAt: now - 10 * 60_000 });
+    yield* f.service.configureProject({
+      kind: "cleanup",
+      projectId: f.input.projectId,
+      expectedRevision: null,
+      value: { kind: "off" },
+    });
+    yield* f.service.idle;
+    expect((yield* f.registry.list)[0]?.status.type).toBe("ready");
+    expect(f.commands.filter((args) => args[0] === "stop")).toHaveLength(0);
+  }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );
 
 it.effect("rejects new cleanup writes outside product bounds and accepts the upper limits", () =>

@@ -1,4 +1,4 @@
-import { WS_METHODS } from "@t3tools/contracts";
+import { WS_METHODS, type ContainerActionInput } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as ContainerWorkspaces from "./ContainerWorkspaces.ts";
 import * as ContainerSubmissions from "./ContainerSubmissions.ts";
@@ -13,8 +13,9 @@ export const handlers = Effect.gen(function* () {
     [WS_METHODS.containersSettings]: service.settings,
     [WS_METHODS.containersConfigure]: service.configure,
     [WS_METHODS.containersConfigureProject]: service.configureProject,
-    [WS_METHODS.containersAct]: service.act,
+    [WS_METHODS.containersAct]: (input: ContainerActionInput) => service.act(input),
     [WS_METHODS.containersCleanup]: () => service.cleanup,
     [WS_METHODS.containersChangeRuntime]: service.changeRuntime,
+    [WS_METHODS.containersWake]: service.wake,
   };
 });
