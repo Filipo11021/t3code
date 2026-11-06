@@ -14,7 +14,7 @@ export const handlers = Effect.gen(function* () {
     [WS_METHODS.containersConfigure]: service.configure,
     [WS_METHODS.containersConfigureProject]: service.configureProject,
     [WS_METHODS.containersAct]: (input: ContainerActionInput) => service.act(input),
-    [WS_METHODS.containersCleanup]: () => service.cleanup,
+    [WS_METHODS.containersCleanup]: () => service.idle.pipe(Effect.andThen(service.cleanup)),
     [WS_METHODS.containersChangeRuntime]: service.changeRuntime,
     [WS_METHODS.containersWake]: service.wake,
   };

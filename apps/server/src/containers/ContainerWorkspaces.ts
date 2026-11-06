@@ -519,7 +519,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const record = yield* find(input.workspaceId);
         if (record.ownership !== "managed") return yield* fail("wake", "not-owned");
-        return yield* ensure(record, { preserveInstallMarker: true });
+        return yield* ensure(record);
       }),
     );
   });
@@ -795,6 +795,18 @@ const make = Effect.gen(function* () {
       retention * (action === "remove-runtime" ? 86_400_000 : 60_000)
     );
   });
+  const touch = Effect.fn("ContainerWorkspaces.touch")(function* (id: ContainerWorkspaceId) {
+    return yield* locks.withLock(
+      id,
+      Effect.gen(function* () {
+        const record = yield* find(id);
+        if (record.status.type !== "ready") return;
+        const now = yield* Clock.currentTimeMillis;
+        if (now - record.lastUsedAt < 60_000) return;
+        yield* registry.save({ ...record, lastUsedAt: now });
+      }),
+    );
+  });
   const cleanup = Effect.gen(function* () {
     yield* guard;
     for (const record of yield* registry.list) {
@@ -828,7 +840,7 @@ const make = Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis;
       const guestIdle = yield* guests.idle(record).pipe(Effect.orElseSucceed(() => false));
       if (!guestIdle) {
-        if (now - record.lastUsedAt >= 60_000) yield* registry.save({ ...record, lastUsedAt: now });
+        if (now - record.lastUsedAt >= 60_000) yield* touch(record.id).pipe(Effect.ignore);
         continue;
       }
       if (now - record.lastUsedAt < rules.idleStopMinutes * 60_000) continue;

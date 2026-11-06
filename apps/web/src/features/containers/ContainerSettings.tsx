@@ -113,7 +113,8 @@ function ContainerRuntimeSection() {
     <SettingsSection id="container-runtime" title="Container runtime">
       <p className="text-sm text-muted-foreground">
         Docker and Podman are detected on the host. New containers use the selected runtime.
-        Existing containers keep their recorded runtime.
+        Existing containers keep their recorded runtime and idle when their guest has no running
+        work. Adjust the idle window under Container cleanup.
       </p>
       <SettingsRow
         serverScoped
