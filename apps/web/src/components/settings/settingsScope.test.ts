@@ -86,9 +86,9 @@ describe("settings scope resolution", () => {
     expect(
       containerSettingsTargets(resolveSettingsScope({ project: "t3code" }, groups, environments)),
     ).toEqual([
-      { environmentId: laptopId, projectId: first.id, label: "T3 Code · /repos/first" },
-      { environmentId: laptopId, projectId: second.id, label: "T3 Code · /repos/second" },
-      { environmentId: serverId, projectId: third.id, label: "T3 Code · /repos/third" },
+      { environmentId: laptopId, projectId: first.id, label: "T3 Code · first" },
+      { environmentId: laptopId, projectId: second.id, label: "T3 Code · second" },
+      { environmentId: serverId, projectId: third.id, label: "T3 Code · third" },
     ]);
     expect(containerSettingsTargets(resolveSettingsScope({}, groups, environments))).toEqual([
       { environmentId: laptopId, projectId: null, label: "Host defaults" },
@@ -120,7 +120,7 @@ describe("settings scope resolution", () => {
         ),
       ),
     ).toEqual([
-      { environmentId: laptopId, projectId: second.id, label: "T3 Code · /repos/second" },
+      { environmentId: laptopId, projectId: second.id, label: "T3 Code · second" },
     ]);
   });
 
