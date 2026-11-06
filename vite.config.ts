@@ -387,6 +387,39 @@ export default defineConfig({
         },
       },
       {
+        files: ["apps/web/src/**"],
+        excludeFiles: [
+          "apps/web/src/features/containers/**",
+          "apps/web/src/composerDraftStore.ts",
+          "apps/web/src/composerDraftStore.test.ts",
+        ],
+        rules: {
+          "eslint/no-restricted-imports": [
+            "error",
+            {
+              paths: [...RESTRICTED_IMPORT_PATHS, RESTRICTED_PULL_REQUEST_GLYPH_IMPORTS],
+              patterns: [
+                ...RESTRICTED_UI_VARIANT_PATTERNS,
+                {
+                  group: [
+                    "**/features/containers/draftState",
+                    "**/features/containers/draftState.ts",
+                  ],
+                  message:
+                    "Container draft persistence belongs to the composer store and container feature. Use selection or submission entry points.",
+                },
+                {
+                  group: ["**/composerDraftStore", "**/composerDraftStore.ts"],
+                  importNames: ["persistContainerDraft"],
+                  message:
+                    "Only the container source controller may persist an issued guest request.",
+                },
+              ],
+            },
+          ],
+        },
+      },
+      {
         files: ["apps/mobile/src/features/**"],
         rules: {
           "eslint/no-restricted-imports": [

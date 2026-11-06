@@ -23,7 +23,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { useAtomValue } from "@effect/atom-react";
 import { shortcutLabelForCommand } from "../keybindings";
 import { primaryServerKeybindingsAtom } from "../state/server";
-import type { ContainerPickerOption } from "../features/containers/useContainerWorkspacePicker";
+import type { ContainerPickerOption } from "../features/containers/selection";
 
 const PREVIOUS_WORKTREE_SELECT_VALUE = "previous-worktree";
 
@@ -31,6 +31,9 @@ interface BranchToolbarEnvModeSelectorProps {
   containerOptions?: ReadonlyArray<ContainerPickerOption>;
   onContainerSelect?: (value: string) => void;
   containersAllowed?: boolean;
+  containerValue?: string | null;
+  containerLabel?: string | null;
+  containerPending?: boolean;
   forceNewWorktree?: boolean;
   envLocked: boolean;
   effectiveEnvMode: EnvMode;
@@ -53,6 +56,9 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
   containerOptions = [],
   onContainerSelect,
   containersAllowed = false,
+  containerValue = null,
+  containerLabel = null,
+  containerPending = false,
 }: BranchToolbarEnvModeSelectorProps) {
   const composerFloatingLayerProps = useComposerMenuProps();
   const shortcutLabel = shortcutLabelForCommand(
@@ -114,9 +120,10 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
   return (
     <Select
       modal={false}
-      value={effectiveEnvMode}
+      value={containerValue ?? effectiveEnvMode}
+      disabled={containerPending}
       onValueChange={(value: string | null) => {
-        if (value === "container-fresh" || value === "container-existing") {
+        if (value?.startsWith("container:")) {
           onContainerSelect?.(value);
           return;
         }
@@ -153,9 +160,10 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
           </ComposerContextLabel>
         </TooltipTrigger>
         <TooltipPopup>
-          {effectiveEnvMode === "worktree"
-            ? resolveEnvModeLabel("worktree")
-            : resolveCurrentWorkspaceLabel(activeWorktreePath)}
+          {containerLabel ??
+            (effectiveEnvMode === "worktree"
+              ? resolveEnvModeLabel("worktree")
+              : resolveCurrentWorkspaceLabel(activeWorktreePath))}
           {shortcutLabel ? ` · ${shortcutLabel}` : null}
         </TooltipPopup>
       </Tooltip>

@@ -39,8 +39,8 @@ export const ContainerConfig = Schema.Struct({
   cleanup: Schema.Struct({ idleStopMinutes: Retention, removeAfterDays: Retention }),
 });
 export type ContainerConfig = typeof ContainerConfig.Type;
-const CONTAINER_MAX_REMOVAL_DAYS = 3650;
-const CONTAINER_MAX_IDLE_MINUTES = 525600;
+export const CONTAINER_MAX_REMOVAL_DAYS = 3650;
+export const CONTAINER_MAX_IDLE_MINUTES = 525600;
 const boundedRetention = (maximum: number) =>
   Schema.NullOr(Schema.Int.pipe(Schema.check(Schema.isBetween({ minimum: 1, maximum }))));
 export const ContainerCleanupRules = Schema.Struct({
@@ -169,17 +169,18 @@ export const ContainerSubmissionInput = Schema.Struct({
   message: ContainerGuestMessage,
 });
 export type ContainerSubmissionInput = typeof ContainerSubmissionInput.Type;
+export const ContainerSubmissionAccepted = Schema.Struct({
+  kind: Schema.Literal("accepted"),
+  threadId: ThreadId,
+  runId: RunId,
+  sequence: Schema.Number,
+  preparation: Schema.Literals(["preparing", "blocked", "released"]),
+});
 export const ContainerSubmissionStatus = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("unseen") }),
   Schema.Struct({ kind: Schema.Literal("reserved") }),
   Schema.Struct({ kind: Schema.Literal("thread-created"), threadId: ThreadId }),
-  Schema.Struct({
-    kind: Schema.Literal("accepted"),
-    threadId: ThreadId,
-    runId: RunId,
-    sequence: Schema.Number,
-    preparation: Schema.Literals(["preparing", "blocked", "released"]),
-  }),
+  ContainerSubmissionAccepted,
   Schema.Struct({
     kind: Schema.Literals(["provider-required", "rejected", "conflict"]),
     reason: Schema.String,

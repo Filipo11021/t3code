@@ -22,6 +22,8 @@ import {
   DEFAULT_MODEL,
   DEFAULT_MODEL_BY_PROVIDER,
   EnvironmentId,
+  ContainerOperationId,
+  ContainerWorkspaceId,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -36,6 +38,7 @@ import {
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
+import type { ContainerDraftState } from "./features/containers/draftState";
 
 const CODEX_INSTANCE = ProviderInstanceId.make("codex");
 const CODEX_SECONDARY_INSTANCE = ProviderInstanceId.make("codex_secondary");
@@ -90,6 +93,7 @@ import {
   type ComposerImageAttachment,
   composerFileNeedsReattach,
   partializeComposerDraftStoreState,
+  persistContainerDraft,
   useComposerDraftStore,
   DraftId,
 } from "./composerDraftStore";
@@ -1011,6 +1015,121 @@ describe("composerDraftStore project draft thread mapping", () => {
     );
     expect(useComposerDraftStore.getState().getDraftThread(draftId)?.threadId).toBe(threadId);
     expect(draftByKey(draftId)?.prompt).toBe("keep me around");
+  });
+
+  it("keeps intent-only container drafts through remapping, persistence and hydration and clears only unissued workspace choices", async () => {
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectRef, draftId, { threadId });
+    const selected: ContainerDraftState = {
+      kind: "selected",
+      intent: {
+        operationId: ContainerOperationId.make("selected-container"),
+        source: { ...projectRef, checkoutPath: "/project" },
+        choice: { type: "fresh" },
+      },
+    };
+    store.setContainerDraft(draftId, selected);
+    const before = useComposerDraftStore.getState().getDraftSession(draftId);
+    store.setContainerDraft(draftId, structuredClone(selected));
+    expect(useComposerDraftStore.getState().getDraftSession(draftId)).toBe(before);
+    store.setProjectDraftThreadId(projectRef, draftId, { threadId, envMode: "local" });
+    expect(useComposerDraftStore.getState().getDraftSession(draftId)?.container).toEqual(selected);
+    store.setProjectDraftThreadId(projectRef, otherDraftId, { threadId: otherThreadId });
+    expect(useComposerDraftStore.getState().getDraftSession(draftId)?.container).toEqual(selected);
+    const persisted = partializeComposerDraftStoreState(useComposerDraftStore.getState());
+    const hydrated = useComposerDraftStore.persist.getOptions().merge!(
+      JSON.parse(JSON.stringify(persisted)),
+      useComposerDraftStore.getState(),
+    );
+    expect(
+      hydrated.getDraftSession(draftId)?.container ??
+        hydrated.draftThreadsByThreadKey[draftId]?.container,
+    ).toEqual(selected);
+    const old = {
+      ...persisted,
+      draftThreadsByThreadKey: {
+        [draftId]: { ...persisted.draftThreadsByThreadKey[draftId], container: undefined },
+      },
+    };
+    const oldHydrated = useComposerDraftStore.persist.getOptions().merge!(
+      old,
+      useComposerDraftStore.getState(),
+    );
+    expect(oldHydrated.draftThreadsByThreadKey[draftId]?.container).toBeNull();
+    for (const change of [
+      { envMode: "local" },
+      { envMode: "worktree" },
+      { worktreePath: "/previous-worktree", envMode: "worktree" },
+    ] as const) {
+      store.setContainerDraft(draftId, selected);
+      store.setDraftThreadContext(draftId, change);
+      expect(useComposerDraftStore.getState().getDraftSession(draftId)?.container).toBeNull();
+    }
+    const captured = {
+      text: "Frozen request",
+      modelSelection: {
+        instanceId: CODEX_INSTANCE,
+        model: "test",
+        options: [{ id: "reasoning", value: "high" }],
+      },
+      driver: CODEX_DRIVER,
+      runtimeMode: "full-access",
+      interactionMode: "plan",
+      effort: null,
+      submissionIntent: "background",
+    } as const;
+    const issued: ContainerDraftState = {
+      kind: "pending",
+      intent: selected.intent,
+      captured,
+      error: null,
+      progress: {
+        kind: "request-issued",
+        destination: {
+          hostEnvironmentId: projectRef.environmentId,
+          workspaceId: ContainerWorkspaceId.make("runtime"),
+          guestEnvironmentId: EnvironmentId.make("guest"),
+          guestProjectId: ProjectId.make("guest-project"),
+          guestCheckoutPath: "/project",
+          label: "Guest",
+        },
+        request: {
+          operationId: selected.intent.operationId,
+          message: {
+            projectId: ProjectId.make("guest-project"),
+            text: "Mapped frozen request",
+            modelSelection: captured.modelSelection,
+            runtimeMode: captured.runtimeMode,
+            interactionMode: captured.interactionMode,
+          },
+        },
+      },
+    };
+    store.setContainerDraft(draftId, issued);
+    await persistContainerDraft(draftId, issued);
+    const frozen = useComposerDraftStore.getState().getDraftSession(draftId);
+    store.setDraftThreadContext(draftId, {
+      projectRef: otherProjectRef,
+      envMode: "local",
+      worktreePath: null,
+    });
+    store.setContainerDraft(draftId, null);
+    expect(useComposerDraftStore.getState().getDraftSession(draftId)).toBe(frozen);
+    store.setPrompt(draftId, "A newer unsent edit");
+    store.setContainerDraft(draftId, { ...issued, error: "response lost" });
+    expect(useComposerDraftStore.getState().getComposerDraft(draftId)?.prompt).toBe(
+      "A newer unsent edit",
+    );
+    const recovered = useComposerDraftStore.persist.getOptions().merge!(
+      JSON.parse(
+        JSON.stringify(partializeComposerDraftStoreState(useComposerDraftStore.getState())),
+      ),
+      useComposerDraftStore.getState(),
+    );
+    expect(recovered.draftThreadsByThreadKey[draftId]?.container).toEqual({
+      ...issued,
+      error: "response lost",
+    });
   });
 
   it("clears every session for a project, including unmapped invested drafts", () => {

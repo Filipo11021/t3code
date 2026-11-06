@@ -138,10 +138,21 @@ describe("command permissions", () => {
       scopes: [AuthSettingsWriteScope],
       partial: [AuthOrchestrationOperateScope],
     },
+    {
+      method: WS_METHODS.containerGuestSubmit,
+      scopes: [AuthOrchestrationOperateScope],
+      partial: [AuthOrchestrationReadScope],
+    },
+    {
+      method: WS_METHODS.containerGuestInspect,
+      scopes: [AuthOrchestrationReadScope],
+      partial: [AuthEnvironmentMaintainScope],
+    },
     ...[
       WS_METHODS.containersOpen,
       WS_METHODS.containersSettings,
       WS_METHODS.containersConfigure,
+      WS_METHODS.containersConfigureProject,
       WS_METHODS.containersAct,
       WS_METHODS.containersCleanup,
     ].map((method) => ({

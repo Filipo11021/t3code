@@ -143,6 +143,10 @@ function showWorkspaceContextMenu(event: ReactMouseEvent, workspacePath: string)
 
 interface RunContextSelectorProps {
   containerItems?: ReactNode;
+  containerValue?: string | null;
+  containerLabel?: string | null;
+  containerPending?: boolean;
+  onContainerSelect?: (value: string) => void;
   displayMode?: "toolbar" | "panel";
   workspaceRoot?: string;
   forceNewWorktree: boolean;
@@ -167,6 +171,10 @@ interface RunContextSelectorProps {
 
 const RunContextSelector = memo(function RunContextSelector({
   containerItems,
+  containerValue = null,
+  containerLabel = null,
+  containerPending = false,
+  onContainerSelect,
   displayMode = "toolbar",
   workspaceRoot,
   forceNewWorktree,
@@ -197,17 +205,19 @@ const RunContextSelector = memo(function RunContextSelector({
       : activeWorktreePath
         ? FolderGitIcon
         : FolderIcon;
-  const workspaceLabel = forceNewWorktree
-    ? resolveEnvModeLabel("worktree")
-    : envModeLocked
-      ? resolveLockedWorkspaceLabel(activeWorktreePath, effectiveEnvMode)
-      : effectiveEnvMode === "worktree"
-        ? resolveEnvModeLabel("worktree")
-        : resolveCurrentWorkspaceLabel(activeWorktreePath);
+  const workspaceLabel =
+    containerLabel ??
+    (forceNewWorktree
+      ? resolveEnvModeLabel("worktree")
+      : envModeLocked
+        ? resolveLockedWorkspaceLabel(activeWorktreePath, effectiveEnvMode)
+        : effectiveEnvMode === "worktree"
+          ? resolveEnvModeLabel("worktree")
+          : resolveCurrentWorkspaceLabel(activeWorktreePath));
   const isPanel = displayMode === "panel";
   const isLocked = envLocked || (envModeLocked && (!isPanel || !showEnvironmentPicker));
   const workspacePath =
-    forceNewWorktree || (effectiveEnvMode === "worktree" && !activeWorktreePath)
+    containerValue || forceNewWorktree || (effectiveEnvMode === "worktree" && !activeWorktreePath)
       ? null
       : (activeWorktreePath ?? workspaceRoot);
   const handleContextMenu = (event: ReactMouseEvent) => {
@@ -398,8 +408,12 @@ const RunContextSelector = memo(function RunContextSelector({
         <MenuGroup>
           <MenuGroupLabel>Workspace</MenuGroupLabel>
           <MenuRadioGroup
-            value={effectiveEnvMode}
+            value={containerValue ?? effectiveEnvMode}
             onValueChange={(value) => {
+              if (value.startsWith("container:")) {
+                onContainerSelect?.(value);
+                return;
+              }
               if (value === "previous-worktree") {
                 onUsePreviousWorktree();
                 return;
@@ -407,7 +421,11 @@ const RunContextSelector = memo(function RunContextSelector({
               onEnvModeChange(value as EnvMode);
             }}
           >
-            <MenuRadioItem disabled={envModeLocked || forceNewWorktree} value="local" closeOnClick>
+            <MenuRadioItem
+              disabled={envModeLocked || forceNewWorktree || containerPending}
+              value="local"
+              closeOnClick
+            >
               <span className="flex min-w-0 items-center gap-1.5">
                 {activeWorktreePath ? (
                   <FolderGitIcon className="size-3" />
@@ -417,19 +435,27 @@ const RunContextSelector = memo(function RunContextSelector({
                 <MiddleTruncate value={resolveCurrentWorkspaceLabel(activeWorktreePath)} />
               </span>
             </MenuRadioItem>
-            <MenuRadioItem disabled={envModeLocked} value="worktree" closeOnClick>
+            <MenuRadioItem
+              disabled={envModeLocked || containerPending}
+              value="worktree"
+              closeOnClick
+            >
               <span className="flex min-w-0 items-center gap-1.5">
                 <FolderGit2Icon className="size-3" />
                 <span className="min-w-0 truncate">{resolveEnvModeLabel("worktree")}</span>
               </span>
             </MenuRadioItem>
             {previousWorktreeLabel ? (
-              <MenuRadioItem disabled={envModeLocked} value="previous-worktree" closeOnClick>
+              <MenuRadioItem
+                disabled={envModeLocked || containerPending}
+                value="previous-worktree"
+                closeOnClick
+              >
                 <PreviousWorktreeItemContent branch={previousWorktreeBranch} />
               </MenuRadioItem>
             ) : null}
+            {containerItems}
           </MenuRadioGroup>
-          {containerItems}
         </MenuGroup>
       </MenuPopup>
     </Menu>
@@ -729,9 +755,13 @@ export const BranchToolbar = memo(function BranchToolbar({
               addTargets={addTargets}
               onAddToMachine={onAddToMachine}
               containerItems={containers.menuItems}
+              containerValue={containers.selectedValue}
+              containerLabel={containers.selectedLabel}
+              containerPending={containers.issued}
+              onContainerSelect={containers.onSelect}
             />
           ) : null}
-          {panelSection !== "workspace" ? (
+          {panelSection !== "workspace" && !containers.selectedValue ? (
             <BranchToolbarBranchSelector
               displayMode="panel"
               className="w-full"
@@ -751,7 +781,6 @@ export const BranchToolbar = memo(function BranchToolbar({
             />
           ) : null}
         </div>
-        {containers.dialog}
       </>
     );
   }
@@ -785,6 +814,10 @@ export const BranchToolbar = memo(function BranchToolbar({
               addTargets={addTargets}
               onAddToMachine={onAddToMachine}
               containerItems={containers.menuItems}
+              containerValue={containers.selectedValue}
+              containerLabel={containers.selectedLabel}
+              containerPending={containers.issued}
+              onContainerSelect={containers.onSelect}
             />
           </div>
         ) : null}
@@ -829,12 +862,15 @@ export const BranchToolbar = memo(function BranchToolbar({
                 containerOptions={containers.options}
                 onContainerSelect={containers.onSelect}
                 containersAllowed={containers.allowed}
+                containerValue={containers.selectedValue}
+                containerLabel={containers.selectedLabel}
+                containerPending={containers.issued}
               />
             ) : null}
           </div>
         ) : null}
 
-        {showGitControls ? (
+        {showGitControls && !containers.selectedValue ? (
           <BranchToolbarBranchSelector
             forceNewWorktree={forceNewWorktree}
             ref={branchSelectorRef}
@@ -855,7 +891,6 @@ export const BranchToolbar = memo(function BranchToolbar({
         {trailing}
         {!showGitControls ? containers.standalone : null}
       </ComposerSurface.ContextStrip>
-      {containers.dialog}
     </>
   );
 });

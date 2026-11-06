@@ -38,6 +38,7 @@ import {
   ContainerActionInput,
   ContainerConfigWrite,
   ConfigureProjectContainerInput,
+  ContainerConfigurationRevision,
   ContainerSubmissionInput,
   ContainerSubmissionStatus,
   ContainerDestination,
@@ -2035,6 +2036,7 @@ export const WsRpcGroup = RpcGroup.make(
   }),
   Rpc.make(WS_METHODS.containersConfigureProject, {
     payload: ConfigureProjectContainerInput,
+    success: ContainerConfigurationRevision,
     error: ContainerError,
   }),
   Rpc.make(WS_METHODS.containersAct, {
