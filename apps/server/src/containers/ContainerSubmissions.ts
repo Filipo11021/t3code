@@ -8,6 +8,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
+import { modelSelectionsEqual } from "@t3tools/shared/model";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -22,7 +23,10 @@ import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as Registry from "./registry.ts";
 
-const sameMessage = Schema.toEquivalence(ContainerGuestMessage);
+const equivalentMessage = Schema.toEquivalence(ContainerGuestMessage);
+const sameMessage = (left: ContainerGuestMessage, right: ContainerGuestMessage) =>
+  modelSelectionsEqual(left.modelSelection, right.modelSelection) &&
+  equivalentMessage({ ...left, modelSelection: right.modelSelection }, right);
 const decodeInput = Schema.decodeEffect(ContainerSubmissionInput);
 const decodeRecord = Schema.decodeEffect(Registry.SubmissionRecord);
 const conflict = {
@@ -151,7 +155,11 @@ const make = Effect.gen(function* () {
             !provider.installed ||
             provider.auth.status !== "authenticated" ||
             (provider.models.length > 0 &&
-              !provider.models.some((model) => model.slug === input.message.modelSelection.model))
+              !provider.models.some(
+                (model) =>
+                  model.slug === input.message.modelSelection.model ||
+                  model.aliases?.includes(input.message.modelSelection.model),
+              ))
           ) {
             return {
               kind: "provider-required",

@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import {
   ContainerError,
+  ConfigureProjectContainerInput,
   ContainerOperationId,
   ContainerWorkspaceId,
   DEFAULT_CONTAINER_CONFIG,
@@ -15,6 +16,7 @@ import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
@@ -29,6 +31,7 @@ import * as Runtime from "./bootstrap.ts";
 import * as Registry from "./registry.ts";
 import * as Guest from "./GuestConnection.ts";
 
+const decodeConfigureProject = Schema.decodeUnknownResult(ConfigureProjectContainerInput);
 const fixture = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -345,6 +348,39 @@ it.effect(
       expect(f.objects.size).toBe(1);
       expect(f.commands.filter((args) => args[0] === "stop")).toHaveLength(0);
     }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+);
+
+it.effect("rejects new cleanup writes outside product bounds and accepts the upper limits", () =>
+  Effect.gen(function* () {
+    const f = yield* confirmedFixture;
+    expect(
+      (yield* f.service
+        .configure({
+          ...DEFAULT_CONTAINER_CONFIG,
+          cleanup: { idleStopMinutes: 525601, removeAfterDays: null },
+        })
+        .pipe(Effect.flip)).reason,
+    ).toBe("incompatible");
+    expect(
+      (yield* f.service
+        .configure({
+          ...DEFAULT_CONTAINER_CONFIG,
+          cleanup: { idleStopMinutes: null, removeAfterDays: 3651 },
+        })
+        .pipe(Effect.flip)).reason,
+    ).toBe("incompatible");
+    yield* f.service.configure({
+      ...DEFAULT_CONTAINER_CONFIG,
+      cleanup: { idleStopMinutes: 525600, removeAfterDays: 3650 },
+    });
+    const outOfRange: unknown = {
+      kind: "cleanup",
+      projectId: f.input.projectId,
+      expectedRevision: null,
+      value: { kind: "custom", rules: { idleStopMinutes: 525601, removeAfterDays: null } },
+    };
+    expect(decodeConfigureProject(outOfRange)._tag).toBe("Failure");
+  }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );
 
 it.effect(

@@ -456,6 +456,16 @@ it.effect.each(["sealed", "created", "accepted"] as const)(
         concurrency: "unbounded",
       });
       assert.isTrue(resumed.every((result) => result.kind === "accepted"));
+      assert.equal(
+        (yield* submissions.submit({
+          ...input,
+          message: {
+            ...input.message,
+            modelSelection: { ...input.message.modelSelection, options: [] },
+          },
+        })).kind,
+        "accepted",
+      );
       yield* preparationSettled(record.launch.threadId);
       const projection = yield* threads.getThreadProjection(record.launch.threadId);
       assert.equal(projection.messages.length, 1);

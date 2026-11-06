@@ -8,7 +8,7 @@ import {
   ContainerConfigurationRevision,
   ContainerCleanupRules,
   ContainerConfigWrite,
-  type ConfigureProjectContainerInput,
+  ConfigureProjectContainerInput,
   type ProjectId,
   type ContainerDestination,
   type ContainerListInput,
@@ -46,6 +46,7 @@ type WorkspaceRecord = ContainerRegistry.WorkspaceRecord;
 const isContainerError = Schema.is(ContainerError);
 const encodeConfig = Schema.encodeEffect(Schema.fromJsonString(ContainerSetup));
 const decodeConfigWrite = Schema.decodeEffect(ContainerConfigWrite);
+const decodeConfigureProject = Schema.decodeEffect(ConfigureProjectContainerInput);
 const validCleanup = Schema.is(ContainerCleanupRules);
 export class ContainerWorkspaces extends Context.Service<
   ContainerWorkspaces,
@@ -59,7 +60,7 @@ export class ContainerWorkspaces extends Context.Service<
     readonly configure: (config: ContainerConfig) => Effect.Effect<void, ContainerError>;
     readonly configureProject: (
       input: ConfigureProjectContainerInput,
-    ) => Effect.Effect<void, ContainerError>;
+    ) => Effect.Effect<typeof ContainerConfigurationRevision.Type, ContainerError>;
     readonly act: (
       input: ContainerActionInput,
     ) => Effect.Effect<ContainerWorkspace, ContainerError>;
@@ -315,6 +316,8 @@ const make = Effect.gen(function* () {
       id,
       Effect.gen(function* () {
         let record = (yield* registry.list).find((entry) => entry.id === id);
+        if (record && (record.ownerEnvironmentId !== owner || record.projectId !== input.projectId))
+          return yield* fail("reuse", "incompatible");
         const mounted = yield* mountsFor(
           {
             projectId: input.projectId,
@@ -326,12 +329,7 @@ const make = Effect.gen(function* () {
           id,
         );
         if (record) {
-          if (
-            record.ownerEnvironmentId !== owner ||
-            record.projectId !== input.projectId ||
-            record.checkoutPath !== mounted.checkout
-          )
-            return yield* fail("reuse", "incompatible");
+          if (record.checkoutPath !== mounted.checkout) return yield* fail("reuse", "incompatible");
         } else {
           if (input.selection.type !== "fresh") return yield* fail("reuse", "not-found");
           const config = yield* locks.withLock(
@@ -493,8 +491,13 @@ const make = Effect.gen(function* () {
     input: ConfigureProjectContainerInput,
   ) {
     yield* guard;
+    const decoded = yield* decodeConfigureProject(input).pipe(
+      Effect.mapError(
+        (cause) => new ContainerError({ stage: "configuration", reason: "incompatible", cause }),
+      ),
+    );
     const project = yield* projects
-      .getById(input.projectId)
+      .getById(decoded.projectId)
       .pipe(
         Effect.mapError(
           (cause) => new ContainerError({ stage: "project", reason: "not-found", cause }),
@@ -502,26 +505,27 @@ const make = Effect.gen(function* () {
       );
     if (Option.isNone(project) || project.value.deletedAt !== null)
       return yield* fail("project", "not-found");
-    yield* locks.withLock(
-      `project-${input.kind}:${input.projectId}`,
+    return yield* locks.withLock(
+      `project-${decoded.kind}:${decoded.projectId}`,
       Effect.gen(function* () {
         const current =
-          input.kind === "setup"
-            ? yield* registry.projectSetup(input.projectId)
-            : yield* registry.projectCleanup(input.projectId);
-        if ((current?.revision ?? null) !== input.expectedRevision)
+          decoded.kind === "setup"
+            ? yield* registry.projectSetup(decoded.projectId)
+            : yield* registry.projectCleanup(decoded.projectId);
+        if ((current?.revision ?? null) !== decoded.expectedRevision)
           return yield* fail("configuration", "configuration-conflict");
         const revision = ContainerConfigurationRevision.make(yield* random.uuidV4());
-        if (input.kind === "setup") {
+        if (decoded.kind === "setup") {
           yield* Effect.try({
-            try: () => ContainerRuntime.guestEnvironment(input.value),
+            try: () => ContainerRuntime.guestEnvironment(decoded.value),
             catch: (cause) =>
               new ContainerError({ stage: "environment", reason: "invalid-environment", cause }),
           });
-          yield* registry.setProjectSetup(input.projectId, { revision, value: input.value });
+          yield* registry.setProjectSetup(decoded.projectId, { revision, value: decoded.value });
         } else {
-          yield* registry.setProjectCleanup(input.projectId, { revision, value: input.value });
+          yield* registry.setProjectCleanup(decoded.projectId, { revision, value: decoded.value });
         }
+        return revision;
       }),
     );
   });
@@ -562,21 +566,24 @@ const make = Effect.gen(function* () {
     record: WorkspaceRecord,
     action: ContainerActionInput["action"],
   ) {
-    const project = yield* projects
-      .getById(record.projectId)
-      .pipe(
-        Effect.mapError(
-          (cause) => new ContainerError({ stage: "cleanup-project", reason: "not-found", cause }),
-        ),
-      );
-    if (Option.isNone(project) || project.value.deletedAt !== null || leases.has(record.id))
+    const project = yield* projects.getById(record.projectId).pipe(Effect.result);
+    if (
+      project._tag === "Failure" ||
+      Option.isNone(project.success) ||
+      project.success.value.deletedAt !== null ||
+      leases.has(record.id)
+    )
       return false;
-    const override = yield* registry.projectCleanup(record.projectId);
-    if (override?.value.kind === "off") return false;
+    const override = yield* registry.projectCleanup(record.projectId).pipe(Effect.result);
+    if (override._tag === "Failure") return false;
+    const policy = override.success;
+    if (policy?.value.kind === "off") return false;
+    const host = yield* registry.config.pipe(Effect.result);
+    if (host._tag === "Failure") return false;
     const rules =
-      override?.value.kind === "custom"
-        ? override.value.rules
-        : ((yield* registry.config) ?? DEFAULT_CONTAINER_CONFIG).cleanup;
+      policy?.value.kind === "custom"
+        ? policy.value.rules
+        : (host.success ?? DEFAULT_CONTAINER_CONFIG).cleanup;
     if (!validCleanup(rules)) return false;
     const retention = action === "remove-runtime" ? rules.removeAfterDays : rules.idleStopMinutes;
     if (retention === null) return false;
