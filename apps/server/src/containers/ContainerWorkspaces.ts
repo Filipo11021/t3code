@@ -516,7 +516,11 @@ const make = Effect.gen(function* () {
       (containerId !== null && containerId !== inspected.Id)
     )
       return yield* fail("identity", "incompatible");
-    if (inspected.State.Running) yield* engine.run(runtime, "stop", ["stop", "--time", "30", name]);
+    if (inspected.State.Running) {
+      const idle = yield* guests.idle(record).pipe(Effect.option);
+      if (Option.isSome(idle) && idle.value === false) return yield* fail("change-runtime", "busy");
+      yield* engine.run(runtime, "stop", ["stop", "--time", "30", name]);
+    }
     yield* engine.run(runtime, "remove", ["rm", name]);
   });
   const changeRuntime = Effect.fn("ContainerWorkspaces.changeRuntime")(function* (
@@ -548,7 +552,7 @@ const make = Effect.gen(function* () {
           yield* engine.run(input.runtime, "remove", ["rm", name]);
         }
         const oldRuntime = record.runtime;
-        const oldStatus = yield* engine.status(oldRuntime);
+        const oldStatus = yield* engine.status(oldRuntime, { refresh: true });
         if (oldStatus.available) {
           yield* removeContainer(record, oldRuntime, record.containerId);
         } else if (record.containerId !== null) {

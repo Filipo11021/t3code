@@ -655,6 +655,21 @@ it.effect("records a stale container when the old runtime is unavailable and cle
   }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );
 
+it.effect("refuses a runtime change while the guest is busy", () =>
+  Effect.gen(function* () {
+    const f = yield* confirmedFixture;
+    const destination = yield* f.service.open(f.input);
+    f.busy(true);
+    expect(
+      yield* f.service
+        .changeRuntime({ workspaceId: destination.workspaceId, runtime: "podman" })
+        .pipe(Effect.flip),
+    ).toMatchObject({ reason: "busy" });
+    expect((yield* f.registry.list)[0]?.runtime).toBe("docker");
+    f.busy(false);
+  }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+);
+
 it.effect("uses the recorded runtime for existing container actions and reopens", () =>
   Effect.gen(function* () {
     const f = yield* confirmedFixture;

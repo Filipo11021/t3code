@@ -117,7 +117,7 @@ function ContainerRuntimeSection() {
         serverScoped
         settingKeys={["containerRuntime"]}
         title="Default container runtime"
-        description="Applies to new containers here. Projects can override it."
+        description="New containers use this runtime here. Existing containers keep their recorded runtime."
         resetAction={
           settings.containerRuntime !== "docker" ? (
             <SettingResetButton
