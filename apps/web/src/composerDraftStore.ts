@@ -99,6 +99,12 @@ import {
   toKindScopedComposerContextId,
 } from "@t3tools/shared/composerContextReferences";
 import { UnifiedSettings } from "@t3tools/contracts/settings";
+import {
+  ContainerDraftState,
+  containerDraftStatesEqual,
+  containerRequestIssued,
+} from "./features/containers/draftState";
+const decodeContainerState = Schema.decodeUnknownOption(ContainerDraftState);
 
 const isElementContextDetails = Schema.is(ElementContextDetails);
 import { ReviewCommentContextSchema, type ReviewCommentContext } from "./reviewCommentContext";
@@ -319,6 +325,7 @@ const PersistedDraftThreadState = Schema.Struct({
   worktreePath: Schema.NullOr(Schema.String),
   envMode: DraftThreadEnvModeSchema,
   startFromOrigin: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  container: Schema.optionalKey(Schema.NullOr(ContainerDraftState)),
   promotedTo: Schema.optionalKey(
     Schema.NullOr(
       Schema.Struct({
@@ -348,6 +355,21 @@ const PersistedComposerDraftStoreStorage = Schema.Struct({
   version: Schema.Number,
   state: PersistedComposerDraftStoreState,
 });
+const decodePersistedContainerStorage = Schema.decodeUnknownSync(
+  PersistedComposerDraftStoreStorage,
+);
+
+export async function persistContainerDraft(draftId: DraftId, value: ContainerDraftState) {
+  useComposerDraftStore.getState().setContainerDraft(draftId, value);
+  composerDebouncedStorage.flush();
+  const raw = await composerDebouncedStorage.getItem(COMPOSER_DRAFT_STORAGE_KEY);
+  const saved = raw
+    ? decodePersistedContainerStorage(JSON.parse(raw)).state.draftThreadsByThreadKey[draftId]
+        ?.container
+    : null;
+  if (!containerDraftStatesEqual(saved ?? null, value))
+    throw new Error("The container request could not be saved. Nothing was submitted.");
+}
 
 export interface ComposerContextAddOptions {
   appendReference?: boolean;
@@ -412,6 +434,7 @@ export interface DraftSessionState {
   worktreePath: string | null;
   envMode: DraftThreadEnvMode;
   startFromOrigin: boolean;
+  container?: ContainerDraftState | null;
   promotedTo?: ScopedThreadRef | null;
 }
 
@@ -499,6 +522,7 @@ interface ComposerDraftStoreState {
       loadBalancedEnvironmentId?: EnvironmentId | null;
     },
   ) => void;
+  setContainerDraft: (draftId: DraftId, container: ContainerDraftState | null) => void;
   clearProjectDraftThreadId: (projectRef: ScopedProjectRef) => void;
   clearProjectDraftThreadById: (
     projectRef: ScopedProjectRef,
@@ -1483,6 +1507,7 @@ function createDraftThreadState(
     loadBalancedEnvironmentId?: EnvironmentId | null;
   },
 ): DraftThreadState {
+  if (existingThread && containerRequestIssued(existingThread.container)) return existingThread;
   const projectChanged =
     existingThread !== undefined &&
     (existingThread.environmentId !== projectRef.environmentId ||
@@ -1529,6 +1554,12 @@ function createDraftThreadState(
     envMode:
       options?.envMode ?? (nextWorktreePath ? "worktree" : (existingThread?.envMode ?? "local")),
     startFromOrigin: nextStartFromOrigin,
+    container:
+      projectChanged ||
+      (options?.envMode !== undefined && options.envMode !== existingThread?.envMode) ||
+      nextWorktreePath !== (existingThread?.worktreePath ?? null)
+        ? null
+        : (existingThread?.container ?? null),
     promotedTo: null,
   };
 }
@@ -1563,6 +1594,7 @@ function draftThreadsEqual(left: DraftThreadState | undefined, right: DraftThrea
     left.worktreePath === right.worktreePath &&
     left.envMode === right.envMode &&
     left.startFromOrigin === right.startFromOrigin &&
+    containerDraftStatesEqual(left.container ?? null, right.container ?? null) &&
     scopedThreadRefsEqual(left.promotedTo, right.promotedTo)
   );
 }
@@ -1711,6 +1743,7 @@ function normalizePersistedDraftThreads(
         worktreePath: normalizedWorktreePath,
         envMode: normalizeDraftThreadEnvMode(candidateDraftThread.envMode, normalizedWorktreePath),
         startFromOrigin,
+        container: Option.getOrNull(decodeContainerState(candidateDraftThread.container)),
         ...(candidateDraftThread.environmentSelection === "manual" ||
         candidateDraftThread.environmentSelection === "auto"
           ? { environmentSelection: candidateDraftThread.environmentSelection }
@@ -2085,6 +2118,7 @@ export function partializeComposerDraftStoreState(
       .filter(
         ([threadKey, draftThread]) =>
           mappedDraftKeys.has(threadKey) ||
+          draftThread.container != null ||
           isDraftThreadPromoting(draftThread) ||
           composerDraftHasUserContent(state.draftsByThreadKey[threadKey]) ||
           draftThreadHasOpenPreview(draftThread),
@@ -2184,9 +2218,7 @@ export function partializeComposerDraftStoreState(
     };
     persistedDraftsByThreadKey[threadKey] = persistedDraft;
   }
-  const persistedDraftThreadsByThreadKey: DeepMutable<
-    PersistedComposerDraftStoreState["draftThreadsByThreadKey"]
-  > = {};
+  const persistedDraftThreadsByThreadKey: Record<string, PersistedDraftThreadState> = {};
   for (const [threadKey, draftThread] of Object.entries(state.draftThreadsByThreadKey)) {
     if (!keptSessionKeys.has(threadKey)) {
       continue;
@@ -2475,6 +2507,7 @@ function toHydratedDraftThreadState(
     worktreePath: persistedDraftThread.worktreePath,
     envMode: persistedDraftThread.envMode,
     startFromOrigin: persistedDraftThread.startFromOrigin,
+    container: persistedDraftThread.container ?? null,
     ...(persistedDraftThread.environmentSelection
       ? { environmentSelection: persistedDraftThread.environmentSelection }
       : {}),
@@ -2672,6 +2705,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                 previousThreadKeyForLogicalProject,
               ) &&
               !isDraftThreadPromoting(previousDraftThread) &&
+              previousDraftThread?.container == null &&
               !composerDraftHasUserContent(
                 state.draftsByThreadKey[previousThreadKeyForLogicalProject],
               ) &&
@@ -2698,6 +2732,31 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             draftId,
             options,
           );
+        },
+        setContainerDraft: (draftId, container) => {
+          const threadKey = resolveComposerDraftKey(get(), draftId);
+          if (!threadKey) return;
+          set((state) => {
+            const existing = state.draftThreadsByThreadKey[threadKey];
+            if (!existing || containerDraftStatesEqual(existing.container ?? null, container))
+              return state;
+            if (
+              containerRequestIssued(existing.container) &&
+              container?.intent.operationId !== existing.container?.intent.operationId &&
+              !(
+                container === null &&
+                existing.container?.kind === "pending" &&
+                existing.container.progress.kind === "accepted"
+              )
+            )
+              return state;
+            return {
+              draftThreadsByThreadKey: {
+                ...state.draftThreadsByThreadKey,
+                [threadKey]: { ...existing, container },
+              },
+            };
+          });
         },
         setDraftThreadContext: (threadRef, options) => {
           const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
@@ -2738,6 +2797,9 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               options.startFromOrigin === undefined
                 ? existing.startFromOrigin
                 : options.startFromOrigin;
+            const replacingWorkspace =
+              projectChanged || options.envMode !== undefined || options.worktreePath !== undefined;
+            if (replacingWorkspace && containerRequestIssued(existing.container)) return state;
             const environmentSelection =
               options.environmentSelection ??
               (options.branch != null || options.worktreePath != null
@@ -2766,6 +2828,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               envMode:
                 options.envMode ?? (nextWorktreePath ? "worktree" : (existing.envMode ?? "local")),
               startFromOrigin: nextStartFromOrigin,
+              container: replacingWorkspace ? null : (existing.container ?? null),
               promotedTo: existing.promotedTo ?? null,
             };
             const isUnchanged =
@@ -2781,6 +2844,10 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               nextDraftThread.worktreePath === existing.worktreePath &&
               nextDraftThread.envMode === existing.envMode &&
               nextDraftThread.startFromOrigin === existing.startFromOrigin &&
+              containerDraftStatesEqual(
+                nextDraftThread.container ?? null,
+                existing.container ?? null,
+              ) &&
               scopedThreadRefsEqual(nextDraftThread.promotedTo, existing.promotedTo);
             if (isUnchanged) {
               return state;

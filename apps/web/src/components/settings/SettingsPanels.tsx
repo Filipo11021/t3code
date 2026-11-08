@@ -483,6 +483,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.sidebarWorkingShelfEnabled !== DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled
       ? ["Working section"]
       : []),
+    ...(settings.containersEnabled !== DEFAULT_UNIFIED_SETTINGS.containersEnabled
+      ? ["Containers"]
+      : []),
     ...(settings.sidebarAutoSettleAfterDays !== DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays
       ? ["Auto-settle inactive threads"]
       : []),
@@ -634,6 +637,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       inAppNotificationsEnabled: DEFAULT_UNIFIED_SETTINGS.inAppNotificationsEnabled,
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
       persistComposerContextStrip: DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip,
+      containersEnabled: DEFAULT_UNIFIED_SETTINGS.containersEnabled,
       diffFilesCollapsed: DEFAULT_UNIFIED_SETTINGS.diffFilesCollapsed,
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       diffLayout: DEFAULT_UNIFIED_SETTINGS.diffLayout,
@@ -901,6 +905,30 @@ export function GeneralSettingsPanel() {
                 updateSettings({ sidebarWorkingShelfEnabled: Boolean(checked) })
               }
               aria-label="Working section"
+            />
+          }
+        />
+      </SettingsSection>
+
+      <SettingsSection id="features" title="Features">
+        <SettingsRow
+          {...searchableSetting("containers-feature")}
+          description="Show New container and managed containers in the workspace picker. Turning it off also hides container setup and cleanup in Settings. Existing container threads keep working."
+          resetAction={
+            settings.containersEnabled !== DEFAULT_UNIFIED_SETTINGS.containersEnabled ? (
+              <SettingResetButton
+                label="containers"
+                onClick={() =>
+                  updateSettings({ containersEnabled: DEFAULT_UNIFIED_SETTINGS.containersEnabled })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.containersEnabled}
+              onCheckedChange={(checked) => updateSettings({ containersEnabled: Boolean(checked) })}
+              aria-label="Containers"
             />
           }
         />

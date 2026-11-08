@@ -4,8 +4,16 @@ import { readLocalApi } from "../localApi";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { ComposerContextLabel } from "./ComposerContextLabel";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
-import { FolderGit2Icon, FolderGitIcon, FolderIcon, PlusIcon, ScaleIcon } from "lucide-react";
+import type { EnvironmentId, ModelSelection, ProjectId, ThreadId } from "@t3tools/contracts";
+import { useContainerWorkspacePicker } from "../features/containers/useContainerWorkspacePicker";
+import {
+  BoxIcon,
+  FolderGit2Icon,
+  FolderGitIcon,
+  FolderIcon,
+  PlusIcon,
+  ScaleIcon,
+} from "lucide-react";
 import {
   type Ref,
   type MouseEvent as ReactMouseEvent,
@@ -86,6 +94,7 @@ interface BranchToolbarProps {
   isServerThread: boolean;
   showGitControls: boolean;
   draftId?: DraftId;
+  containerModelSelection?: ModelSelection;
   onEnvModeChange: (mode: EnvMode) => void;
   envMode: EnvMode;
   activeThreadBranchOverride?: string | null;
@@ -140,6 +149,12 @@ function showWorkspaceContextMenu(event: ReactMouseEvent, workspacePath: string)
 }
 
 interface RunContextSelectorProps {
+  containerFreshItem?: ReactNode;
+  containerExistingItem?: ReactNode;
+  containerValue?: string | null;
+  containerLabel?: string | null;
+  containerPending?: boolean;
+  onContainerSelect?: (value: string) => void;
   displayMode?: "toolbar" | "panel";
   workspaceRoot?: string;
   forceNewWorktree: boolean;
@@ -163,6 +178,12 @@ interface RunContextSelectorProps {
 }
 
 const RunContextSelector = memo(function RunContextSelector({
+  containerFreshItem,
+  containerExistingItem,
+  containerValue = null,
+  containerLabel = null,
+  containerPending = false,
+  onContainerSelect,
   displayMode = "toolbar",
   workspaceRoot,
   forceNewWorktree,
@@ -187,23 +208,26 @@ const RunContextSelector = memo(function RunContextSelector({
   const composerFloatingLayerProps = useComposerMenuProps();
   const activeEnvironment =
     availableEnvironments?.find((env) => env.environmentId === environmentId) ?? null;
-  const WorkspaceIcon =
-    effectiveEnvMode === "worktree"
+  const WorkspaceIcon = containerValue
+    ? BoxIcon
+    : effectiveEnvMode === "worktree"
       ? FolderGit2Icon
       : activeWorktreePath
         ? FolderGitIcon
         : FolderIcon;
-  const workspaceLabel = forceNewWorktree
-    ? resolveEnvModeLabel("worktree")
-    : envModeLocked
-      ? resolveLockedWorkspaceLabel(activeWorktreePath, effectiveEnvMode)
-      : effectiveEnvMode === "worktree"
-        ? resolveEnvModeLabel("worktree")
-        : resolveCurrentWorkspaceLabel(activeWorktreePath);
+  const workspaceLabel =
+    containerLabel ??
+    (forceNewWorktree
+      ? resolveEnvModeLabel("worktree")
+      : envModeLocked
+        ? resolveLockedWorkspaceLabel(activeWorktreePath, effectiveEnvMode)
+        : effectiveEnvMode === "worktree"
+          ? resolveEnvModeLabel("worktree")
+          : resolveCurrentWorkspaceLabel(activeWorktreePath));
   const isPanel = displayMode === "panel";
   const isLocked = envLocked || (envModeLocked && (!isPanel || !showEnvironmentPicker));
   const workspacePath =
-    forceNewWorktree || (effectiveEnvMode === "worktree" && !activeWorktreePath)
+    containerValue || forceNewWorktree || (effectiveEnvMode === "worktree" && !activeWorktreePath)
       ? null
       : (activeWorktreePath ?? workspaceRoot);
   const handleContextMenu = (event: ReactMouseEvent) => {
@@ -394,8 +418,12 @@ const RunContextSelector = memo(function RunContextSelector({
         <MenuGroup>
           <MenuGroupLabel>Workspace</MenuGroupLabel>
           <MenuRadioGroup
-            value={effectiveEnvMode}
+            value={containerValue ?? effectiveEnvMode}
             onValueChange={(value) => {
+              if (value.startsWith("container:")) {
+                onContainerSelect?.(value);
+                return;
+              }
               if (value === "previous-worktree") {
                 onUsePreviousWorktree();
                 return;
@@ -403,7 +431,11 @@ const RunContextSelector = memo(function RunContextSelector({
               onEnvModeChange(value as EnvMode);
             }}
           >
-            <MenuRadioItem disabled={envModeLocked || forceNewWorktree} value="local" closeOnClick>
+            <MenuRadioItem
+              disabled={envModeLocked || forceNewWorktree || containerPending}
+              value="local"
+              closeOnClick
+            >
               <span className="flex min-w-0 items-center gap-1.5">
                 {activeWorktreePath ? (
                   <FolderGitIcon className="size-3" />
@@ -413,18 +445,28 @@ const RunContextSelector = memo(function RunContextSelector({
                 <MiddleTruncate value={resolveCurrentWorkspaceLabel(activeWorktreePath)} />
               </span>
             </MenuRadioItem>
-            <MenuRadioItem disabled={envModeLocked} value="worktree" closeOnClick>
+            <MenuRadioItem
+              disabled={envModeLocked || containerPending}
+              value="worktree"
+              closeOnClick
+            >
               <span className="flex min-w-0 items-center gap-1.5">
                 <FolderGit2Icon className="size-3" />
                 <span className="min-w-0 truncate">{resolveEnvModeLabel("worktree")}</span>
               </span>
             </MenuRadioItem>
             {previousWorktreeLabel ? (
-              <MenuRadioItem disabled={envModeLocked} value="previous-worktree" closeOnClick>
+              <MenuRadioItem
+                disabled={envModeLocked || containerPending}
+                value="previous-worktree"
+                closeOnClick
+              >
                 <PreviousWorktreeItemContent branch={previousWorktreeBranch} />
               </MenuRadioItem>
             ) : null}
+            {containerFreshItem}
           </MenuRadioGroup>
+          {containerExistingItem}
         </MenuGroup>
       </MenuPopup>
     </Menu>
@@ -604,6 +646,7 @@ export const BranchToolbar = memo(function BranchToolbar({
   isServerThread,
   showGitControls,
   draftId,
+  containerModelSelection,
   onEnvModeChange,
   envMode,
   activeThreadBranchOverride,
@@ -628,6 +671,14 @@ export const BranchToolbar = memo(function BranchToolbar({
   const activeWorktreePath = forceNewWorktree ? null : worktreePath;
   const effectiveEnvMode = forceNewWorktree ? "worktree" : envMode;
   const envModeLocked = envLocked || (isServerThread && activeWorktreePath !== null);
+  const containers = useContainerWorkspacePicker({
+    environmentId,
+    projectId,
+    checkoutPath: activeWorktreePath ?? activeProject?.workspaceRoot ?? "",
+    draftId,
+    modelSelection: containerModelSelection,
+    locked: envLocked || isServerThread || forceNewWorktree || !activeProject,
+  });
 
   const canUsePreviousWorktree = !isServerThread && !envModeLocked && !forceNewWorktree;
   const projectRefsForWorktreeLookup = canUsePreviousWorktree ? [activeProjectRef] : [];
@@ -690,35 +741,153 @@ export const BranchToolbar = memo(function BranchToolbar({
 
   if (layout === "panel") {
     return (
-      <div className="flex w-full flex-col" data-thread-panel-run-context>
-        {panelSection !== "branch" ? (
-          <RunContextSelector
-            displayMode="panel"
-            workspaceRoot={activeProject.workspaceRoot}
-            forceNewWorktree={forceNewWorktree}
-            autoEnvironmentLabel={autoEnvironmentLabel}
-            onAutoEnvironment={onAutoEnvironment}
-            envLocked={envLocked}
-            envModeLocked={envModeLocked}
-            environmentId={environmentId}
-            availableEnvironments={availableEnvironments}
-            showEnvironmentPicker={showEnvironmentPicker}
-            showEnvironmentIndicator={activeEnvironmentOption !== null}
-            onEnvironmentChange={onEnvironmentChange}
-            effectiveEnvMode={effectiveEnvMode}
-            activeWorktreePath={activeWorktreePath}
-            onEnvModeChange={onEnvModeChange}
-            previousWorktreeLabel={previousWorktreeLabel}
-            previousWorktreeBranch={previousWorktreeSeed?.branch ?? null}
-            onUsePreviousWorktree={onUsePreviousWorktree}
-            addTargets={addTargets}
-            onAddToMachine={onAddToMachine}
-          />
+      <>
+        <div className="flex w-full flex-col" data-thread-panel-run-context>
+          {panelSection !== "branch" ? (
+            <RunContextSelector
+              displayMode="panel"
+              workspaceRoot={activeProject.workspaceRoot}
+              forceNewWorktree={forceNewWorktree}
+              autoEnvironmentLabel={autoEnvironmentLabel}
+              onAutoEnvironment={onAutoEnvironment}
+              envLocked={envLocked}
+              envModeLocked={envModeLocked}
+              environmentId={environmentId}
+              availableEnvironments={availableEnvironments}
+              showEnvironmentPicker={showEnvironmentPicker}
+              showEnvironmentIndicator={activeEnvironmentOption !== null}
+              onEnvironmentChange={onEnvironmentChange}
+              effectiveEnvMode={effectiveEnvMode}
+              activeWorktreePath={activeWorktreePath}
+              onEnvModeChange={onEnvModeChange}
+              previousWorktreeLabel={previousWorktreeLabel}
+              previousWorktreeBranch={previousWorktreeSeed?.branch ?? null}
+              onUsePreviousWorktree={onUsePreviousWorktree}
+              addTargets={addTargets}
+              onAddToMachine={onAddToMachine}
+              containerFreshItem={containers.freshItem}
+              containerExistingItem={containers.existingItem}
+              containerValue={containers.selectedValue}
+              containerLabel={containers.selectedLabel}
+              containerPending={containers.issued}
+              onContainerSelect={containers.onSelect}
+            />
+          ) : null}
+          {panelSection !== "workspace" && !containers.selectedValue ? (
+            <BranchToolbarBranchSelector
+              displayMode="panel"
+              className="w-full"
+              environmentId={environmentId}
+              threadId={threadId}
+              {...(draftId ? { draftId } : {})}
+              envLocked={envLocked}
+              effectiveEnvModeOverride={effectiveEnvMode}
+              {...(activeThreadBranchOverride !== undefined ? { activeThreadBranchOverride } : {})}
+              {...(onActiveThreadBranchOverrideChange
+                ? { onActiveThreadBranchOverrideChange }
+                : {})}
+              startFromOrigin={startFromOrigin}
+              onStartFromOriginChange={onStartFromOriginChange}
+              {...(onCheckoutPullRequestRequest ? { onCheckoutPullRequestRequest } : {})}
+              {...(onComposerFocusRequest ? { onComposerFocusRequest } : {})}
+            />
+          ) : null}
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <ComposerSurface.ContextStrip
+        ref={attachStrip}
+        data-compact={labelsOverflow ? "" : undefined}
+        className={cn("gap-1 text-xs font-normal text-foreground/70 dark:text-muted-foreground")}
+      >
+        {showGitControls ? (
+          <div className="contents @xl/composer-surface:hidden">
+            <RunContextSelector
+              forceNewWorktree={forceNewWorktree}
+              autoEnvironmentLabel={autoEnvironmentLabel}
+              onAutoEnvironment={onAutoEnvironment}
+              envLocked={envLocked}
+              envModeLocked={envModeLocked}
+              environmentId={environmentId}
+              availableEnvironments={availableEnvironments}
+              showEnvironmentPicker={showEnvironmentPicker}
+              showEnvironmentIndicator={showEnvironmentIndicator}
+              onEnvironmentChange={onEnvironmentChange}
+              effectiveEnvMode={effectiveEnvMode}
+              activeWorktreePath={activeWorktreePath}
+              onEnvModeChange={onEnvModeChange}
+              previousWorktreeLabel={previousWorktreeLabel}
+              previousWorktreeBranch={previousWorktreeSeed?.branch ?? null}
+              onUsePreviousWorktree={onUsePreviousWorktree}
+              addTargets={addTargets}
+              onAddToMachine={onAddToMachine}
+              containerFreshItem={containers.freshItem}
+              containerExistingItem={containers.existingItem}
+              containerValue={containers.selectedValue}
+              containerLabel={containers.selectedLabel}
+              containerPending={containers.issued}
+              onContainerSelect={containers.onSelect}
+            />
+          </div>
         ) : null}
-        {panelSection !== "workspace" ? (
+        {showGitControls || showEnvironmentIndicator ? (
+          <div
+            className={cn(
+              "min-h-7 min-w-10 items-center gap-1 sm:min-h-6",
+              showGitControls ? "hidden @xl/composer-surface:flex" : "flex",
+              "flex-1",
+            )}
+          >
+            {showEnvironmentIndicator && availableEnvironments && (
+              <>
+                <BranchToolbarEnvironmentSelector
+                  autoEnvironmentLabel={autoEnvironmentLabel}
+                  onAutoEnvironment={onAutoEnvironment}
+                  envLocked={envLocked}
+                  environmentId={environmentId}
+                  availableEnvironments={availableEnvironments}
+                  {...(showEnvironmentPicker ? { onEnvironmentChange } : {})}
+                  {...(addTargets.length > 0 ? { onAddToMachine: () => onAddToMachine(null) } : {})}
+                />
+                {showGitControls ? (
+                  <Separator
+                    orientation="vertical"
+                    className="mx-0.5 h-3.5!"
+                    data-composer-context-control
+                  />
+                ) : null}
+              </>
+            )}
+            {showGitControls ? (
+              <BranchToolbarEnvModeSelector
+                forceNewWorktree={forceNewWorktree}
+                envLocked={envModeLocked}
+                effectiveEnvMode={effectiveEnvMode}
+                activeWorktreePath={activeWorktreePath}
+                onEnvModeChange={onEnvModeChange}
+                previousWorktreeLabel={previousWorktreeLabel}
+                previousWorktreeBranch={previousWorktreeSeed?.branch ?? null}
+                onUsePreviousWorktree={onUsePreviousWorktree}
+                containerFreshItem={containers.freshItem}
+                containerExistingItem={containers.existingItem}
+                onContainerSelect={containers.onSelect}
+                containerValue={containers.selectedValue}
+                containerLabel={containers.selectedLabel}
+                containerPending={containers.issued}
+              />
+            ) : null}
+          </div>
+        ) : null}
+
+        {showGitControls && !containers.selectedValue ? (
           <BranchToolbarBranchSelector
-            displayMode="panel"
-            className="w-full"
+            forceNewWorktree={forceNewWorktree}
+            ref={branchSelectorRef}
+            className="min-w-0 flex-initial justify-end @xl/composer-surface:ml-auto"
             environmentId={environmentId}
             threadId={threadId}
             {...(draftId ? { draftId } : {})}
@@ -732,102 +901,9 @@ export const BranchToolbar = memo(function BranchToolbar({
             {...(onComposerFocusRequest ? { onComposerFocusRequest } : {})}
           />
         ) : null}
-      </div>
-    );
-  }
-
-  return (
-    <ComposerSurface.ContextStrip
-      ref={attachStrip}
-      data-compact={labelsOverflow ? "" : undefined}
-      className={cn("gap-1 text-xs font-normal text-foreground/70 dark:text-muted-foreground")}
-    >
-      {showGitControls ? (
-        <div className="contents @xl/composer-surface:hidden">
-          <RunContextSelector
-            forceNewWorktree={forceNewWorktree}
-            autoEnvironmentLabel={autoEnvironmentLabel}
-            onAutoEnvironment={onAutoEnvironment}
-            envLocked={envLocked}
-            envModeLocked={envModeLocked}
-            environmentId={environmentId}
-            availableEnvironments={availableEnvironments}
-            showEnvironmentPicker={showEnvironmentPicker}
-            showEnvironmentIndicator={showEnvironmentIndicator}
-            onEnvironmentChange={onEnvironmentChange}
-            effectiveEnvMode={effectiveEnvMode}
-            activeWorktreePath={activeWorktreePath}
-            onEnvModeChange={onEnvModeChange}
-            previousWorktreeLabel={previousWorktreeLabel}
-            previousWorktreeBranch={previousWorktreeSeed?.branch ?? null}
-            onUsePreviousWorktree={onUsePreviousWorktree}
-            addTargets={addTargets}
-            onAddToMachine={onAddToMachine}
-          />
-        </div>
-      ) : null}
-      {showGitControls || showEnvironmentIndicator ? (
-        <div
-          className={cn(
-            "min-h-7 min-w-10 items-center gap-1 sm:min-h-6",
-            showGitControls ? "hidden @xl/composer-surface:flex" : "flex",
-            "flex-1",
-          )}
-        >
-          {showEnvironmentIndicator && availableEnvironments && (
-            <>
-              <BranchToolbarEnvironmentSelector
-                autoEnvironmentLabel={autoEnvironmentLabel}
-                onAutoEnvironment={onAutoEnvironment}
-                envLocked={envLocked}
-                environmentId={environmentId}
-                availableEnvironments={availableEnvironments}
-                {...(showEnvironmentPicker ? { onEnvironmentChange } : {})}
-                {...(addTargets.length > 0 ? { onAddToMachine: () => onAddToMachine(null) } : {})}
-              />
-              {showGitControls ? (
-                <Separator
-                  orientation="vertical"
-                  className="mx-0.5 h-3.5!"
-                  data-composer-context-control
-                />
-              ) : null}
-            </>
-          )}
-          {showGitControls ? (
-            <BranchToolbarEnvModeSelector
-              forceNewWorktree={forceNewWorktree}
-              envLocked={envModeLocked}
-              effectiveEnvMode={effectiveEnvMode}
-              activeWorktreePath={activeWorktreePath}
-              onEnvModeChange={onEnvModeChange}
-              previousWorktreeLabel={previousWorktreeLabel}
-              previousWorktreeBranch={previousWorktreeSeed?.branch ?? null}
-              onUsePreviousWorktree={onUsePreviousWorktree}
-            />
-          ) : null}
-        </div>
-      ) : null}
-
-      {showGitControls ? (
-        <BranchToolbarBranchSelector
-          forceNewWorktree={forceNewWorktree}
-          ref={branchSelectorRef}
-          className="min-w-0 flex-initial justify-end @xl/composer-surface:ml-auto"
-          environmentId={environmentId}
-          threadId={threadId}
-          {...(draftId ? { draftId } : {})}
-          envLocked={envLocked}
-          effectiveEnvModeOverride={effectiveEnvMode}
-          {...(activeThreadBranchOverride !== undefined ? { activeThreadBranchOverride } : {})}
-          {...(onActiveThreadBranchOverrideChange ? { onActiveThreadBranchOverrideChange } : {})}
-          startFromOrigin={startFromOrigin}
-          onStartFromOriginChange={onStartFromOriginChange}
-          {...(onCheckoutPullRequestRequest ? { onCheckoutPullRequestRequest } : {})}
-          {...(onComposerFocusRequest ? { onComposerFocusRequest } : {})}
-        />
-      ) : null}
-      {trailing}
-    </ComposerSurface.ContextStrip>
+        {trailing}
+        {!showGitControls ? containers.standalone : null}
+      </ComposerSurface.ContextStrip>
+    </>
   );
 });

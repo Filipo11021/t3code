@@ -1,13 +1,15 @@
 import {
-  ConnectionCatalogDocument,
-  type ConnectionCatalogDocument as ConnectionCatalogDocumentType,
+  type ConnectionCatalogState,
   EMPTY_CONNECTION_CATALOG_DOCUMENT,
 } from "@t3tools/client-runtime/platform";
+import {
+  decodeConnectionCatalog,
+  encodeConnectionCatalog,
+} from "@t3tools/client-runtime/containers/catalog";
 import { ConnectionTransientError } from "@t3tools/client-runtime/connection";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
-import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 
 import * as MobileSecureStorage from "../persistence/mobile-secure-storage";
@@ -23,28 +25,24 @@ function catalogError(operation: string, cause: unknown) {
   });
 }
 
-const ConnectionCatalogDocumentJson = Schema.fromJsonString(ConnectionCatalogDocument);
-const decodeConnectionCatalogDocument = Schema.decodeEffect(ConnectionCatalogDocumentJson);
-const encodeConnectionCatalogDocument = Schema.encodeEffect(ConnectionCatalogDocumentJson);
-
 const decodeCatalog = Effect.fn("mobile.connectionStorage.decodeCatalog")(function* (raw: string) {
-  return yield* decodeConnectionCatalogDocument(raw).pipe(
+  return yield* decodeConnectionCatalog(raw).pipe(
     Effect.mapError((cause) => catalogError("decode", cause)),
   );
 });
 
 const encodeCatalog = Effect.fn("mobile.connectionStorage.encodeCatalog")(function* (
-  catalog: ConnectionCatalogDocumentType,
+  catalog: ConnectionCatalogState,
 ) {
-  return yield* encodeConnectionCatalogDocument(catalog).pipe(
+  return yield* encodeConnectionCatalog(catalog).pipe(
     Effect.mapError((cause) => catalogError("encode", cause)),
   );
 });
 
 interface CatalogStore {
-  readonly read: Effect.Effect<ConnectionCatalogDocumentType, ConnectionTransientError>;
+  readonly read: Effect.Effect<ConnectionCatalogState, ConnectionTransientError>;
   readonly update: (
-    transform: (catalog: ConnectionCatalogDocumentType) => ConnectionCatalogDocumentType,
+    transform: (catalog: ConnectionCatalogState) => ConnectionCatalogState,
   ) => Effect.Effect<void, ConnectionTransientError>;
 }
 
@@ -56,7 +54,7 @@ export const make = Effect.fn("mobile.connectionStorage.makeCatalogStore")(funct
     storage.setItem(key, value).pipe(Effect.mapError((cause) => catalogError("save", cause)));
   const deleteItem = (key: string) =>
     storage.removeItem(key).pipe(Effect.mapError((cause) => catalogError("delete", cause)));
-  const state = yield* Ref.make<Option.Option<ConnectionCatalogDocumentType>>(Option.none());
+  const state = yield* Ref.make<Option.Option<ConnectionCatalogState>>(Option.none());
   const lock = yield* Semaphore.make(1);
 
   const loadLegacyCatalog = Effect.fn("mobile.connectionStorage.loadLegacyCatalog")(function* () {
@@ -86,16 +84,21 @@ export const make = Effect.fn("mobile.connectionStorage.makeCatalogStore")(funct
       return cached.value;
     }
     const raw = yield* getItem(CONNECTION_CATALOG_KEY);
-    let catalog: ConnectionCatalogDocumentType;
+    let catalog: ConnectionCatalogState;
     if (raw !== null && raw.trim() !== "") {
-      catalog = yield* decodeCatalog(raw).pipe(
+      const decoded = yield* decodeCatalog(raw).pipe(
         Effect.catch((error) =>
           Effect.logWarning("Discarding corrupt mobile connection catalog", error).pipe(
             Effect.andThen(deleteItem(CONNECTION_CATALOG_KEY)),
             Effect.andThen(loadLegacyCatalog()),
+            Effect.map((state) => ({ state, repair: undefined })),
           ),
         ),
       );
+      if (decoded.repair !== undefined) {
+        yield* setItem(CONNECTION_CATALOG_KEY, decoded.repair);
+      }
+      catalog = decoded.state;
     } else {
       catalog = yield* loadLegacyCatalog();
     }

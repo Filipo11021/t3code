@@ -25,13 +25,7 @@ import { toastManager } from "../ui/toast";
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
-import {
-  NumberField,
-  NumberFieldDecrement,
-  NumberFieldGroup,
-  NumberFieldIncrement,
-  NumberFieldInput,
-} from "../ui/number-field";
+import { RetentionControl } from "./RetentionControl";
 import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
 import { DatabaseStorageNotice } from "./DatabaseStorageNotice";
 import { AdvancedSettings } from "./AdvancedSettings";
@@ -106,69 +100,6 @@ export function WorktreesDirectoryRow() {
         />
       }
     />
-  );
-}
-
-function RetentionControl({
-  label,
-  value,
-  onChange,
-  minimum = 1,
-}: {
-  label: string;
-  value: number | null;
-  onChange: (value: number | null) => void;
-  minimum?: number;
-}) {
-  const [draft, setDraft] = useState(value);
-  const [savedValue, setSavedValue] = useState(value);
-  if (savedValue !== value) {
-    setSavedValue(value);
-    setDraft(value);
-  }
-
-  return (
-    <div className="flex items-center gap-3">
-      {value !== null ? (
-        <NumberField
-          value={draft}
-          min={minimum}
-          max={3650}
-          step={1}
-          size="sm"
-          className="w-auto"
-          onValueChange={setDraft}
-          onValueCommitted={(next) => {
-            if (next === null) setDraft(value);
-            else {
-              const days = Math.min(3650, Math.max(minimum, Math.round(next)));
-              setDraft(days);
-              onChange(days);
-            }
-          }}
-        >
-          <NumberFieldGroup>
-            <NumberFieldDecrement aria-label={`Decrease ${label}`} />
-            <NumberFieldInput
-              aria-label={`${label} in days`}
-              size={5}
-              className="w-auto grow-0 text-right"
-            />
-            <span aria-hidden="true" className="self-center pr-2 text-xs">
-              days
-            </span>
-            <NumberFieldIncrement aria-label={`Increase ${label}`} />
-          </NumberFieldGroup>
-        </NumberField>
-      ) : (
-        <span className="text-xs text-muted-foreground">Off</span>
-      )}
-      <Switch
-        aria-label={label}
-        checked={value !== null}
-        onCheckedChange={(enabled) => onChange(enabled ? 8 : null)}
-      />
-    </div>
   );
 }
 

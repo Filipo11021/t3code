@@ -30,7 +30,7 @@ import type {
   ConnectionAttemptError,
   ConnectionTarget,
   NetworkStatus,
-  PersistedConnectionTarget,
+  SavedConnectionTarget,
   SupervisorConnectionState,
 } from "./model.ts";
 import { ConnectionBlockedError } from "./model.ts";
@@ -525,8 +525,21 @@ export const make = Effect.gen(function* () {
       ),
     );
 
-  const persistedRoutes = (entry: ConnectionCatalogEntry) =>
-    connectionRoutes(entry).map((route) => route.target as PersistedConnectionTarget);
+  const persistedRoutes = Effect.fn("EnvironmentRegistry.persistedRoutes")(function* (
+    entry: ConnectionCatalogEntry,
+  ) {
+    const targets: Array<SavedConnectionTarget> = [];
+    for (const { target } of connectionRoutes(entry)) {
+      if (target._tag === "PrimaryConnectionTarget") {
+        return yield* new ConnectionBlockedError({
+          reason: "configuration",
+          detail: "Primary connections cannot be saved as routes.",
+        });
+      }
+      targets.push(target);
+    }
+    return targets;
+  });
 
   /**
    * Pull request routing trust and an unsupported verdict both belong to the saved addresses: a changed set may
@@ -590,7 +603,7 @@ export const make = Effect.gen(function* () {
           }
           entry = next.entry;
         }
-        yield* registrations.register(registration, persistedRoutes(entry));
+        yield* registrations.register(registration, yield* persistedRoutes(entry));
         yield* Ref.update(persistedEnvironmentIds, (current) =>
           new Set(current).add(environmentId),
         );
@@ -609,7 +622,7 @@ export const make = Effect.gen(function* () {
     if (next.addressesChanged) {
       yield* forgetRoutingTrust(environmentId, "set-connection-routes");
     }
-    yield* registrations.setRoutes(environmentId, persistedRoutes(next.entry));
+    yield* registrations.setRoutes(environmentId, yield* persistedRoutes(next.entry));
     yield* installEntryLocked(next.entry);
   });
 
@@ -956,7 +969,7 @@ export const make = Effect.gen(function* () {
           }
           yield* profiles.put(profile);
         }
-        yield* registrations.setRoutes(input.environmentId, persistedRoutes(next));
+        yield* registrations.setRoutes(input.environmentId, yield* persistedRoutes(next));
         const lease = (yield* SubscriptionRef.get(serviceScopes)).get(input.environmentId);
         if (lease !== undefined) {
           yield* SubscriptionRef.update(serviceScopes, (current) =>

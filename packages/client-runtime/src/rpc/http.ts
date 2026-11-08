@@ -88,7 +88,7 @@ export const layerRemoteHttpClient = (
 
 const remoteApiBaseUrl = (httpBaseUrl: string): string => {
   const url = new URL(httpBaseUrl);
-  url.pathname = "/";
+  url.pathname = `${containerRoutePrefix(httpBaseUrl)}/`;
   url.search = "";
   url.hash = "";
   return url.toString();
@@ -173,3 +173,4 @@ export const executeEnvironmentHttpRequest = <A, E, R>(
     ),
     Effect.catch((cause) => failRemoteRequest(requestUrl, cause)),
   );
+import { containerRoutePrefix } from "../containers/endpoint.ts";

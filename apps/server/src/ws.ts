@@ -191,6 +191,9 @@ import * as TerminalManager from "./terminal/Manager.ts";
 import { terminalOutputStream, withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
 import * as ServerBrowser from "./preview/ServerBrowser.ts";
 import * as DeviceService from "./device/DeviceService.ts";
+import * as ContainerRpc from "./containers/rpc.ts";
+import * as ContainerWorkspaces from "./containers/ContainerWorkspaces.ts";
+import * as ContainerSubmissions from "./containers/ContainerSubmissions.ts";
 import { remoteSshDeviceHosts } from "./device/localSshDeviceHost.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import { issueAssetUrl } from "./assets/AssetAccess.ts";
@@ -1402,6 +1405,7 @@ export const layerWsRpc = (
       const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
       const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
       const deviceService = yield* DeviceService.DeviceService;
+      const containerHandlers = yield* ContainerRpc.handlers;
       const deviceHostContext =
         yield* Effect.context<Effect.Services<ReturnType<typeof remoteSshDeviceHosts>>>();
       const orchestrationEngine = yield* Orchestrator.OrchestratorV2;
@@ -2615,6 +2619,7 @@ export const layerWsRpc = (
             return yield* keybindings.removeKeybindingRule(rule);
           }),
         [WS_METHODS.serverRunStorageCleanup]: () => storageCleanup.runNow,
+        ...containerHandlers,
         [WS_METHODS.serverGetStorageCleanupReport]: () => storageCleanup.reports,
         [WS_METHODS.serverGetDatabaseStorage]: () => databaseStorage.status,
         [WS_METHODS.peerLinksList]: (_input) =>
@@ -3416,6 +3421,8 @@ export const WS_RPC_SERVER_OPTIONS = {
 
 export const layer = Layer.unwrap(
   Effect.gen(function* () {
+    const containers = yield* ContainerWorkspaces.ContainerWorkspaces;
+    const containerSubmissions = yield* ContainerSubmissions.ContainerSubmissions;
     const serverBrowser = yield* ServerBrowser.ServerBrowser;
     const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
     const npmRelease = yield* NpmRelease.NpmRelease;
@@ -3494,6 +3501,10 @@ export const layer = Layer.unwrap(
               readSettingsClient(url.value),
             ).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
+              Layer.provide(Layer.succeed(ContainerWorkspaces.ContainerWorkspaces, containers)),
+              Layer.provide(
+                Layer.succeed(ContainerSubmissions.ContainerSubmissions, containerSubmissions),
+              ),
               // Handler-context reporters see only request defects, not server-wide defects.
               Layer.provide(DefectReporter.layer),
               Layer.provide(Layer.succeed(SqlClient.SqlClient, sql)),

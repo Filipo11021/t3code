@@ -12,6 +12,7 @@ import { useEnvironmentScope } from "~/state/session";
 import { isWslSettingsRowVisible } from "./ConnectionsSettings.logic";
 import { isProviderSettingsEnvironmentAvailable } from "./ProviderSettingsPanel.logic";
 import type { SettingsScopeSearch } from "./settingsScope";
+import { useClientSettings } from "../../hooks/useSettings";
 import {
   filterAvailableSettingsSearchItems,
   getThreadAutoSettlementSearchAvailability,
@@ -57,6 +58,7 @@ export function useAvailableSettingsSearchItems(scopeSearch: SettingsScopeSearch
   const cloudPublicConfig = hasCloudPublicConfig() === true;
   const wslSettingsRowVisible =
     isWslSettingsRowVisible({ state: desktopWsl.data, error: desktopWsl.error }) === true;
+  const containersEnabled = useClientSettings((settings) => settings.containersEnabled);
 
   return filterAvailableSettingsSearchItems({
     localEnvironmentDisabled,
@@ -69,5 +71,6 @@ export function useAvailableSettingsSearchItems(scopeSearch: SettingsScopeSearch
     hasThreadAutoSettlement,
     managedTunnelActive,
     hasPeerLinkHost,
+    containersEnabled,
   });
 }

@@ -1744,7 +1744,11 @@ export default function ChatView(props: ChatViewProps) {
       isDraftHeroState,
       persistInActiveThreads: settings.persistComposerContextStrip,
       hasActiveProject: activeProject !== null && !showProviderSubagentBar,
-      isGitRepo,
+      isGitRepo:
+        isGitRepo ||
+        (routeKind === "draft" &&
+          settings.containersEnabled &&
+          serverConfig?.environment.capabilities.containerWorkspaces === true),
       showEnvironmentIndicator: showComposerEnvironmentIndicator,
     });
   const terminalShortcutLabelOptions = {
@@ -2883,7 +2887,7 @@ export default function ChatView(props: ChatViewProps) {
     activeEnvironmentUnavailable,
     defaultRuntimeMode,
   });
-  const { onSend } = useComposerSend({
+  const { onSend, containerDialog } = useComposerSend({
     environmentId,
     routeThreadKey,
     currentRouteThreadKeyRef,
@@ -3752,6 +3756,9 @@ export default function ChatView(props: ChatViewProps) {
                                 environmentId={activeThread.environmentId}
                                 threadId={activeThread.id}
                                 projectId={activeThread.projectId}
+                                containerModelSelection={
+                                  composerSelectedModelSelection ?? activeThread.modelSelection
+                                }
                                 worktreePath={activeThread.worktreePath}
                                 isServerThread={isServerThread}
                                 showGitControls={isGitRepo}
@@ -3850,6 +3857,9 @@ export default function ChatView(props: ChatViewProps) {
                   worktreePath={activeThread.worktreePath}
                   isServerThread={isServerThread}
                   {...(draftId ? { draftId } : {})}
+                  containerModelSelection={
+                    composerSelectedModelSelection ?? activeThread.modelSelection
+                  }
                   activeProjectName={activeProject?.title}
                   activeProjectScripts={activeProject ? activeProjectScripts : undefined}
                   preferredScriptId={
@@ -3938,6 +3948,7 @@ export default function ChatView(props: ChatViewProps) {
         )}
       </div>
 
+      {containerDialog}
       {rightPanelPresent && activeThreadRef && !embedded ? (
         <ChatRightPanel
           sheet={shouldUsePlanSidebarSheet}

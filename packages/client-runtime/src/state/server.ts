@@ -1202,6 +1202,7 @@ export function createServerEnvironmentAtoms<R, E>(
 
   return {
     configValueAtom,
+    containers: createContainerCommands(runtime),
     runStorageCleanup: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:run-storage-cleanup",
       tag: WS_METHODS.serverRunStorageCleanup,
@@ -1609,3 +1610,4 @@ export function createServerEnvironmentAtoms<R, E>(
     }),
   };
 }
+import { createContainerCommands } from "../containers/state.ts";

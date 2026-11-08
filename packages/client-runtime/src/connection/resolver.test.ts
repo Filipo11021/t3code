@@ -1,5 +1,6 @@
 import {
   EnvironmentId,
+  ContainerWorkspaceId,
   ORCHESTRATION_PROTOCOL_VERSION,
   type DesktopSshEnvironmentTarget,
 } from "@t3tools/contracts";
@@ -14,6 +15,7 @@ import * as ClientCapabilities from "../platform/capabilities.ts";
 import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
 import {
   BearerConnectionCredential,
+  BearerConnectionProfile,
   type ConnectionCatalogEntry,
   SshConnectionProfile,
   type ConnectionCredential,
@@ -22,12 +24,17 @@ import {
 import * as ConnectionCredentialStore from "./credentialStore.ts";
 import {
   ConnectionTransientError,
+  BearerConnectionTarget,
+  ContainerConnectionTarget,
   PrimaryConnectionTarget,
+  RelayConnectionTarget,
   SshConnectionTarget,
   type ConnectionTarget,
 } from "./model.ts";
 import * as ConnectionProfileStore from "./profileStore.ts";
 import * as RpcHttp from "../rpc/http.ts";
+import * as Persistence from "../platform/persistence.ts";
+import * as ManagedRelay from "../relay/managedRelay.ts";
 import {
   PullRequestRoutingPermissions,
   pullRequestRoutingConnectionKey,
@@ -128,20 +135,27 @@ const makeDependencies = Effect.fn("TestConnectionResolver.makeDependencies")((o
   });
 
   const layerDependencies = Layer.mergeAll(
-    RpcHttp.layerRemoteHttpClient((() =>
+    RpcHttp.layerRemoteHttpClient(((input) =>
       Promise.resolve(
-        Response.json({
-          environmentId: ENVIRONMENT_ID,
-          label: "Compatible environment",
-          platform: { os: "linux", arch: "x64" },
-          serverVersion: "0.0.0-test",
-          ...(options?.descriptorProtocolVersion === undefined
-            ? { orchestrationProtocolVersion: ORCHESTRATION_PROTOCOL_VERSION }
-            : options.descriptorProtocolVersion === null
-              ? {}
-              : { orchestrationProtocolVersion: options.descriptorProtocolVersion }),
-          capabilities: { repositoryIdentity: true },
-        }),
+        Response.json(
+          String(input).includes("websocket-ticket")
+            ? {
+                ticket: "host-ticket",
+                expiresAt: "2099-01-01T00:00:00.000Z",
+              }
+            : {
+                environmentId: ENVIRONMENT_ID,
+                label: "Compatible environment",
+                platform: { os: "linux", arch: "x64" },
+                serverVersion: "0.0.0-test",
+                ...(options?.descriptorProtocolVersion === undefined
+                  ? { orchestrationProtocolVersion: ORCHESTRATION_PROTOCOL_VERSION }
+                  : options.descriptorProtocolVersion === null
+                    ? {}
+                    : { orchestrationProtocolVersion: options.descriptorProtocolVersion }),
+                capabilities: { repositoryIdentity: true },
+              },
+        ),
       )) satisfies typeof fetch),
     Layer.succeed(
       ConnectionProfileStore.ConnectionProfileStore,
@@ -168,6 +182,73 @@ const makeDependencies = Effect.fn("TestConnectionResolver.makeDependencies")((o
 });
 
 describe("ConnectionResolver", () => {
+  it.effect("opens a container through an available host route after its first route fails", () =>
+    Effect.gen(function* () {
+      const hostId = EnvironmentId.make("container-host");
+      const direct = new BearerConnectionTarget({
+        environmentId: hostId,
+        label: "Host LAN",
+        connectionId: "lan",
+      });
+      const relay = new RelayConnectionTarget({ environmentId: hostId, label: "Host relay" });
+      const child = new ContainerConnectionTarget({
+        environmentId: ENVIRONMENT_ID,
+        hostEnvironmentId: hostId,
+        workspaceId: ContainerWorkspaceId.make("workspace"),
+        label: "Guest",
+      });
+      const dependencies = yield* makeDependencies({
+        profiles: [
+          new BearerConnectionProfile({
+            environmentId: hostId,
+            label: "LAN",
+            connectionId: "lan",
+            httpBaseUrl: "https://offline-lan.test",
+            wsBaseUrl: "wss://offline-lan.test",
+          }),
+        ],
+        credentials: [["lan", new BearerConnectionCredential({ token: "test-only" })]],
+        authorizeBearer: () =>
+          Effect.fail(
+            new ConnectionTransientError({ reason: "network", detail: "LAN unavailable" }),
+          ),
+        authorizeDpop: () =>
+          Effect.succeed({
+            environmentId: hostId,
+            label: "Relay",
+            httpBaseUrl: "https://working-relay.test",
+            socketUrl: "wss://working-relay.test/ws",
+            httpAuthorization: {
+              _tag: "Dpop",
+              accessToken: "host-access",
+              expiresAtEpochMs: Number.MAX_SAFE_INTEGER,
+            },
+          }),
+      });
+      const broker = yield* ConnectionResolver.ConnectionResolver.pipe(
+        Effect.provide(
+          dependencies.pipe(
+            Layer.provide(
+              Layer.mergeAll(
+                Layer.mock(Persistence.ConnectionTargetStore)({
+                  list: Effect.succeed([direct, relay]),
+                  listDisabled: Effect.succeed([]),
+                }),
+                Layer.mock(ManagedRelay.ManagedRelayDpopSigner)({
+                  createProof: () => Effect.succeed("signed-proof"),
+                }),
+              ),
+            ),
+          ),
+        ),
+      );
+      const result = yield* broker.prepare(catalogEntry(child));
+      expect(result.environmentId).toBe(ENVIRONMENT_ID);
+      expect(result.httpBaseUrl).toBe(
+        "https://working-relay.test/api/container-gateway/workspace/",
+      );
+    }),
+  );
   it.effect("blocks an old host during discovery before opening orchestration RPC", () =>
     Effect.gen(function* () {
       const layerBroker = yield* makeDependencies({ descriptorProtocolVersion: null });

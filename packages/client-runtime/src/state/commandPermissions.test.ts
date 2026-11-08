@@ -13,6 +13,8 @@ import {
   AuthOrchestrationReadScope,
   AuthPreviewOperateScope,
   AuthSettingsWriteScope,
+  AuthEnvironmentMaintainScope,
+  CONTAINER_HOST_SCOPES,
   AuthSourceControlWriteScope,
   ThreadId,
   EnvironmentId,
@@ -130,12 +132,43 @@ describe("command permissions", () => {
     ),
   );
 
-  it.effect("requires the destination settings grant to run storage cleanup", () =>
+  it.effect.each([
+    {
+      method: WS_METHODS.serverRunStorageCleanup,
+      scopes: [AuthSettingsWriteScope],
+      partial: [AuthOrchestrationOperateScope],
+    },
+    {
+      method: WS_METHODS.containerGuestSubmit,
+      scopes: [AuthOrchestrationOperateScope],
+      partial: [AuthOrchestrationReadScope],
+    },
+    {
+      method: WS_METHODS.containerGuestInspect,
+      scopes: [AuthOrchestrationReadScope],
+      partial: [AuthEnvironmentMaintainScope],
+    },
+    ...[
+      WS_METHODS.containersOpen,
+      WS_METHODS.containersSettings,
+      WS_METHODS.containersConfigure,
+      WS_METHODS.containersConfigureProject,
+      WS_METHODS.containersAct,
+      WS_METHODS.containersCleanup,
+    ].map((method) => ({
+      method,
+      scopes: CONTAINER_HOST_SCOPES,
+      partial: [AuthEnvironmentMaintainScope],
+    })),
+  ])("requires the full destination grant for $method", ({ method, scopes, partial }) =>
     Effect.scoped(
       Effect.gen(function* () {
         const registry = yield* setup;
-        const cleanup = createCommandPermissions(runtime, WS_METHODS.serverRunStorageCleanup);
-        registry.set(sessions(env), AsyncResult.success(grant(true)));
+        const cleanup = createCommandPermissions(runtime, method);
+        registry.set(
+          sessions(env),
+          AsyncResult.success({ ...grant(true), scopes: partial, permissions: partial }),
+        );
         expect(registry.get(cleanup.permissionAtom(env))).toBe(false);
         expect((yield* cleanup.authorize(registry, env).pipe(Effect.flip))._tag).toBe(
           "EnvironmentAuthorizationError",
@@ -144,8 +177,8 @@ describe("command permissions", () => {
           sessions(env),
           AsyncResult.success({
             ...grant(true),
-            scopes: [AuthSettingsWriteScope],
-            permissions: [AuthSettingsWriteScope],
+            scopes,
+            permissions: scopes,
           }),
         );
         expect(registry.get(cleanup.permissionAtom(env))).toBe(true);

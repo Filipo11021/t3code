@@ -1,6 +1,5 @@
 import {
-  ConnectionCatalogDocument,
-  type ConnectionCatalogDocument as ConnectionCatalogDocumentType,
+  type ConnectionCatalogState,
   EMPTY_CONNECTION_CATALOG_DOCUMENT,
   ORCHESTRATION_CACHE_SCHEMA_VERSION,
   ORCHESTRATION_THREAD_CACHE_SCHEMA_VERSION,
@@ -17,6 +16,10 @@ import {
   Persistence,
   makeStoredShellSnapshotEncoder,
 } from "@t3tools/client-runtime/platform";
+import {
+  decodeConnectionCatalog,
+  encodeConnectionCatalog,
+} from "@t3tools/client-runtime/containers/catalog";
 import { TokenStore } from "@t3tools/client-runtime/authorization";
 import {
   ConnectionTransientError,
@@ -65,9 +68,6 @@ const StoredVcsRefs = Schema.Struct({
   refs: VcsListRefsResult,
 });
 const StoredVcsRefsJson = Schema.fromJsonString(StoredVcsRefs);
-const ConnectionCatalogDocumentJson = Schema.fromJsonString(ConnectionCatalogDocument);
-const decodeConnectionCatalogDocument = Schema.decodeUnknownEffect(ConnectionCatalogDocumentJson);
-const encodeConnectionCatalogDocument = Schema.encodeEffect(ConnectionCatalogDocumentJson);
 const decodeStoredShellSnapshot = Schema.decodeUnknownEffect(StoredShellSnapshotJson);
 const decodeStoredThreadSnapshot = Schema.decodeUnknownEffect(StoredThreadSnapshotJson);
 const encodeStoredThreadSnapshot = Schema.encodeEffect(StoredThreadSnapshotJson);
@@ -366,15 +366,15 @@ function vcsRefsCacheKey(environmentId: EnvironmentId, cwd: string) {
 }
 
 const decodeCatalog = Effect.fn("web.connectionStorage.decodeCatalog")(function* (raw: string) {
-  return yield* decodeConnectionCatalogDocument(raw).pipe(
+  return yield* decodeConnectionCatalog(raw).pipe(
     Effect.mapError((cause) => catalogError("decode", cause)),
   );
 });
 
 const encodeCatalog = Effect.fn("web.connectionStorage.encodeCatalog")(function* (
-  catalog: ConnectionCatalogDocumentType,
+  catalog: ConnectionCatalogState,
 ) {
-  return yield* encodeConnectionCatalogDocument(catalog).pipe(
+  return yield* encodeConnectionCatalog(catalog).pipe(
     Effect.mapError((cause) => catalogError("encode", cause)),
   );
 });
@@ -423,16 +423,16 @@ export function makeCatalogBackend(database: DatabaseHandle): CatalogBackend {
 }
 
 interface CatalogStore {
-  readonly read: Effect.Effect<ConnectionCatalogDocumentType, ConnectionTransientError>;
+  readonly read: Effect.Effect<ConnectionCatalogState, ConnectionTransientError>;
   readonly update: (
-    transform: (catalog: ConnectionCatalogDocumentType) => ConnectionCatalogDocumentType,
+    transform: (catalog: ConnectionCatalogState) => ConnectionCatalogState,
   ) => Effect.Effect<void, ConnectionTransientError>;
 }
 
 export const makeCatalogStore = Effect.fn("web.connectionStorage.makeCatalogStore")(function* (
   backend: CatalogBackend,
 ) {
-  const state = yield* Ref.make<Option.Option<ConnectionCatalogDocumentType>>(Option.none());
+  const state = yield* Ref.make<Option.Option<ConnectionCatalogState>>(Option.none());
   const lock = yield* Semaphore.make(1);
 
   const loadUnlocked = Effect.fn("web.connectionStorage.loadCatalog")(function* () {
@@ -441,9 +441,9 @@ export const makeCatalogStore = Effect.fn("web.connectionStorage.makeCatalogStor
       return cached.value;
     }
     const raw = yield* backend.read;
-    let catalog = EMPTY_CONNECTION_CATALOG_DOCUMENT;
+    let catalog: ConnectionCatalogState = EMPTY_CONNECTION_CATALOG_DOCUMENT;
     if (raw !== null && raw.trim() !== "") {
-      catalog = yield* decodeCatalog(raw).pipe(
+      const decoded = yield* decodeCatalog(raw).pipe(
         Effect.catch((error) =>
           Effect.gen(function* () {
             yield* Effect.logWarning("Discarding a corrupt web connection catalog.", {
@@ -466,10 +466,14 @@ export const makeCatalogStore = Effect.fn("web.connectionStorage.makeCatalogStor
                 }),
               ),
             );
-            return EMPTY_CONNECTION_CATALOG_DOCUMENT;
+            return { state: EMPTY_CONNECTION_CATALOG_DOCUMENT, repair: undefined };
           }),
         ),
       );
+      if (decoded.repair !== undefined) {
+        yield* backend.write(decoded.repair);
+      }
+      catalog = decoded.state;
     }
     yield* Ref.set(state, Option.some(catalog));
     return catalog;

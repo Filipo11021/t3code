@@ -89,7 +89,11 @@ import {
 import { environmentServerConfigsAtom } from "../../state/server";
 import { threadEnvironment } from "../../state/threads";
 import { runMobileComposerTransition } from "./draftHeroTransition";
-import { useClientSettingsHydrated, useEnvironmentSettings } from "../../hooks/useSettings";
+import {
+  useClientSettingsHydrated,
+  useClientSettings,
+  useEnvironmentSettings,
+} from "../../hooks/useSettings";
 import { environmentPresentations } from "../../state/presentation";
 import {
   approvalRedirectNotice,
@@ -144,6 +148,8 @@ import type { useQueuedRunEdit } from "./useQueuedRunEdit";
 import type { useTimelineFollow } from "./useTimelineFollow";
 import type { useUsageLimitsPanel } from "./useUsageLimitsPanel";
 import type { useWorktreeSetup } from "./useWorktreeSetup";
+import { useContainerSubmission } from "../../features/containers/useContainerSubmission";
+import { containerSendEntry } from "../../features/containers/submission";
 
 const ENVIRONMENT_UNAVAILABLE_SEND_TOAST_TRAIL_SIZE = 3;
 
@@ -339,6 +345,7 @@ export function useComposerSend(input: ComposerSendInput) {
   const handleNewThread = useNewThreadHandler();
   const navigate = useNavigate();
   const clientSettingsHydrated = useClientSettingsHydrated();
+  const containersEnabled = useClientSettings((settings) => settings.containersEnabled);
   const planModeEnabled = useEnvironmentSettings(environmentId, selectPlanModeEnabled);
   const startThreadTurn = useOrchestrationCommand(threadEnvironment.startTurn, {
     reportFailure: false,
@@ -393,6 +400,51 @@ export function useComposerSend(input: ComposerSendInput) {
   const { sendInFlight: sendInFlightRef } = draftSendState(routeThreadKey);
   const composerSendGenerationRef = useRef(0);
   const environmentUnavailableSendToastSlotRef = useRef(0);
+  const containerSubmission = useContainerSubmission({
+    draftId,
+    hydrated: () => clientSettingsHydrated && useComposerDraftStore.persist.hasHydrated(),
+    supported: () => {
+      const capabilities = appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)
+        ?.environment.capabilities;
+      return (
+        containersEnabled &&
+        capabilities?.containerWorkspaces === true &&
+        capabilities.containerProjects === true &&
+        !activeEnvironmentUnavailable &&
+        readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)
+      );
+    },
+    read: () => {
+      const live =
+        currentRouteThreadKeyRef.current === routeThreadKey
+          ? composerRef.current?.getSendContext()
+          : null;
+      return {
+        editor: live,
+        text: live ? (composerRef.current?.readSnapshot().value ?? live.prompt) : null,
+        workspaceRoot: activeProject?.workspaceRoot ?? null,
+        firstSendAllowed: isLocalDraftThread && !isServerThread,
+        providerDriver:
+          appAtomRegistry
+            .get(environmentServerConfigsAtom)
+            .get(environmentId)
+            ?.providers.find(
+              (provider) => provider.instanceId === live?.selectedModelSelection.instanceId,
+            )?.driver ?? null,
+      };
+    },
+    clear: () => {
+      if (!draftId) return;
+      useComposerDraftStore.getState().clearComposerContent(draftId);
+      if (currentRouteThreadKeyRef.current === routeThreadKey) {
+        promptRef.current = "";
+        composerRef.current?.resetCursorState();
+      }
+    },
+    error: (message) => {
+      if (activeThread) setThreadError(activeThread.id, message);
+    },
+  });
   // A send awaits uploads before it declines, so it reads the approvals pending by then.
   const pendingApprovalsRef = useRef(pendingApprovals);
   const respondingRequestIdsRef = useRef(respondingRequestIds);
@@ -402,8 +454,7 @@ export function useComposerSend(input: ComposerSendInput) {
     respondingRequestIdsRef.current = respondingRequestIds;
   }, [pendingApprovals, respondingRequestIds]);
 
-  const onSend = async (
-    e?: { preventDefault: () => void },
+  const sendOnHost = async (
     dispatchMode: ComposerDispatchMode = "auto",
     submissionIntent: ComposerSubmissionIntent = "foreground",
     directAnnotation?: {
@@ -411,7 +462,6 @@ export function useComposerSend(input: ComposerSendInput) {
       image: ComposerImageAttachment | null;
     },
   ) => {
-    e?.preventDefault();
     // What the user pressed send on; uploads below can take a while, and a redirect must not
     // decline approvals for a draft that changed meanwhile.
     const promptAtSend = promptRef.current;
@@ -1513,5 +1563,17 @@ export function useComposerSend(input: ComposerSendInput) {
     }
   };
 
-  return { onSend };
+  const onSend = async (
+    event?: { preventDefault: () => void },
+    dispatchMode: ComposerDispatchMode = "auto",
+    submissionIntent: ComposerSubmissionIntent = "foreground",
+    annotation?: Parameters<typeof sendOnHost>[2],
+  ) =>
+    containerSendEntry({ intercept: containerSubmission.intercept, onHostSend: sendOnHost })(
+      event,
+      dispatchMode,
+      submissionIntent,
+      annotation,
+    );
+  return { onSend, containerDialog: containerSubmission.dialog };
 }

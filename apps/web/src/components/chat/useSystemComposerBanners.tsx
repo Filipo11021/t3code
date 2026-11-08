@@ -71,6 +71,13 @@ export function useSystemComposerBanners(input: SystemComposerBannersInput) {
   const setEnvironmentEnabled = useAtomCommand(environmentCatalog.setEnabled, {
     reportFailure: false,
   });
+  const wakeContainer = useAtomCommand(serverEnvironment.containers.wake, {
+    reportFailure: false,
+  });
+  const activeContainerTarget =
+    activeEnvironment?.entry.target._tag === "ContainerConnectionTarget"
+      ? activeEnvironment.entry.target
+      : null;
   const activeEnvironmentConnectionPhase = activeEnvironment?.connection.phase ?? "available";
   const activeReconnectingEnvironmentId =
     activeEnvironmentConnectionPhase === "connecting" ||
@@ -84,6 +91,23 @@ export function useSystemComposerBanners(input: SystemComposerBannersInput) {
     ENVIRONMENT_RECONNECT_WARNING_GRACE_MS,
   );
   const handleReconnectActiveEnvironment = async (environmentId: EnvironmentId) => {
+    if (activeContainerTarget?.environmentId === environmentId) {
+      const wake = await wakeContainer({
+        environmentId: activeContainerTarget.hostEnvironmentId,
+        input: { workspaceId: activeContainerTarget.workspaceId },
+      });
+      if (wake._tag === "Failure" && !isAtomCommandInterrupted(wake)) {
+        const error = squashAtomCommandFailure(wake);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not wake container",
+            description: error instanceof Error ? error.message : "Failed to wake the container.",
+          }),
+        );
+        return;
+      }
+    }
     // A retry does nothing while the environment is switched off.
     const result =
       activeEnvironment?.entry.enabled === false
@@ -184,12 +208,17 @@ export function useSystemComposerBanners(input: SystemComposerBannersInput) {
       unavailableConnection !== null &&
       !suppressUnavailableBanner;
     if (showUnavailableBanner) {
+      const containerUnavailable =
+        activeContainerTarget !== null &&
+        activeContainerTarget.environmentId === activeEnvironmentUnavailableState.environmentId;
       items.push({
         id: `environment-unavailable:${activeEnvironmentUnavailableState.environmentId}`,
         variant: unavailableConnection.phase === "error" ? "error" : "warning",
         group: "environment",
         icon: <WifiOffIcon />,
-        title: `${activeEnvironmentUnavailableState.label} is ${environmentReconnecting ? "reconnecting" : "offline"}`,
+        title: `${activeEnvironmentUnavailableState.label} is ${
+          environmentReconnecting ? "reconnecting" : containerUnavailable ? "idle" : "offline"
+        }`,
         description: activeEnvironment ? (
           <ConnectionDiagnosisHeadline environment={activeEnvironment} />
         ) : undefined,
@@ -205,7 +234,7 @@ export function useSystemComposerBanners(input: SystemComposerBannersInput) {
                   )
                 }
               >
-                Reconnect
+                {containerUnavailable ? "Wake container" : "Reconnect"}
               </Button>
             ) : null}
             {disconnectAction}

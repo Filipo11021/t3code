@@ -103,6 +103,7 @@ export function environmentMcpUrl(input: {
   readonly relayHttpBaseUrl?: string | undefined;
   readonly connectedTarget?: ConnectionTarget | null | undefined;
 }): string | null {
+  if (input.entry.target._tag === "ContainerConnectionTarget") return null;
   const connectedRouteId = input.connectedTarget ? connectionRouteId(input.connectedTarget) : null;
   const routes = connectionRoutes(input.entry);
   const connectedRoute = routes.find(
@@ -134,6 +135,8 @@ function mcpUrlFromBase(httpBaseUrl: string): string | null {
 
 export function connectionCatalogDisplayUrl(entry: ConnectionCatalogEntry): string | null {
   switch (entry.target._tag) {
+    case "ContainerConnectionTarget":
+      return null;
     case "PrimaryConnectionTarget":
       return entry.target.httpBaseUrl;
     case "RelayConnectionTarget":

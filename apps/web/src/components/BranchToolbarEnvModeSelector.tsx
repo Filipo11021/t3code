@@ -1,7 +1,7 @@
-import { ComposerSelectControl } from "./chat/ComposerControl";
+import { ComposerControl } from "./chat/ComposerControl";
 import { ComposerContextLabel } from "./ComposerContextLabel";
-import { FolderGit2Icon, FolderGitIcon, FolderIcon } from "lucide-react";
-import { memo, type MouseEvent as ReactMouseEvent } from "react";
+import { BoxIcon, FolderGit2Icon, FolderGitIcon, FolderIcon } from "lucide-react";
+import { memo, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 
 import {
   resolveCurrentWorkspaceLabel,
@@ -12,13 +12,14 @@ import {
 import { useComposerMenuProps } from "./chat/composerEventScope";
 import { PreviousWorktreeItemContent } from "./PreviousWorktreeItemContent";
 import {
-  Select,
-  SelectGroup,
-  SelectGroupLabel,
-  SelectItem,
-  SelectPopup,
-  SelectValue,
-} from "./ui/select";
+  Menu,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuPopup,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuTrigger,
+} from "./ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { useAtomValue } from "@effect/atom-react";
 import { shortcutLabelForCommand } from "../keybindings";
@@ -27,6 +28,12 @@ import { primaryServerKeybindingsAtom } from "../state/server";
 const PREVIOUS_WORKTREE_SELECT_VALUE = "previous-worktree";
 
 interface BranchToolbarEnvModeSelectorProps {
+  containerFreshItem?: ReactNode;
+  containerExistingItem?: ReactNode;
+  onContainerSelect?: (value: string) => void;
+  containerValue?: string | null;
+  containerLabel?: string | null;
+  containerPending?: boolean;
   forceNewWorktree?: boolean;
   envLocked: boolean;
   effectiveEnvMode: EnvMode;
@@ -46,6 +53,12 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
   previousWorktreeLabel,
   previousWorktreeBranch = null,
   onUsePreviousWorktree,
+  containerFreshItem,
+  containerExistingItem,
+  onContainerSelect,
+  containerValue = null,
+  containerLabel = null,
+  containerPending = false,
 }: BranchToolbarEnvModeSelectorProps) {
   const composerFloatingLayerProps = useComposerMenuProps();
   const shortcutLabel = shortcutLabelForCommand(
@@ -53,16 +66,20 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
     "composer.workspace",
   );
   const showPreviousWorktree = Boolean(previousWorktreeLabel && onUsePreviousWorktree);
-  const envModeItems = [
-    {
-      value: "local",
-      label: resolveCurrentWorkspaceLabel(activeWorktreePath),
-    },
-    { value: "worktree", label: resolveEnvModeLabel("worktree") },
-    ...(showPreviousWorktree && previousWorktreeLabel
-      ? [{ value: PREVIOUS_WORKTREE_SELECT_VALUE, label: previousWorktreeLabel }]
-      : []),
-  ];
+  const workspaceLabel =
+    containerLabel ??
+    (effectiveEnvMode === "worktree"
+      ? resolveEnvModeLabel("worktree")
+      : resolveCurrentWorkspaceLabel(activeWorktreePath));
+  const workspaceIcon = containerValue ? (
+    <BoxIcon className="size-3" />
+  ) : effectiveEnvMode === "worktree" ? (
+    <FolderGit2Icon className="size-3" />
+  ) : activeWorktreePath ? (
+    <FolderGitIcon className="size-3" />
+  ) : (
+    <FolderIcon className="size-3" />
+  );
 
   const stopContextMenuMouseDown = (event: ReactMouseEvent) => {
     if (event.button !== 0 || event.ctrlKey) {
@@ -104,79 +121,78 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
   }
 
   return (
-    <Select
-      modal={false}
-      value={effectiveEnvMode}
-      onValueChange={(value: string | null) => {
-        if (value === PREVIOUS_WORKTREE_SELECT_VALUE) {
-          onUsePreviousWorktree?.();
-          return;
-        }
-        onEnvModeChange(value as EnvMode);
-      }}
-      items={envModeItems}
-    >
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <ComposerSelectControl
-              size="xs"
-              className="min-w-0 shrink"
-              aria-label="Workspace"
-              data-composer-shortcut="composer.workspace"
-              data-composer-context-control
-              onMouseDownCapture={stopContextMenuMouseDown}
-            />
-          }
-        >
-          {effectiveEnvMode === "worktree" ? (
-            <FolderGit2Icon className="size-3" />
-          ) : activeWorktreePath ? (
-            <FolderGitIcon className="size-3" />
-          ) : (
-            <FolderIcon className="size-3" />
-          )}
-          <ComposerContextLabel>
-            <SelectValue />
-          </ComposerContextLabel>
-        </TooltipTrigger>
-        <TooltipPopup>
-          {effectiveEnvMode === "worktree"
-            ? resolveEnvModeLabel("worktree")
-            : resolveCurrentWorkspaceLabel(activeWorktreePath)}
-          {shortcutLabel ? ` · ${shortcutLabel}` : null}
-        </TooltipPopup>
-      </Tooltip>
-      <SelectPopup
-        alignItemWithTrigger={false}
-        {...composerFloatingLayerProps}
-        className={showPreviousWorktree ? "w-[min(21rem,calc(100vw-2rem))]" : undefined}
+    <Menu>
+      <MenuTrigger
+        render={<ComposerControl size="xs" />}
+        className="min-w-0 shrink"
+        aria-label="Workspace"
+        data-composer-shortcut="composer.workspace"
+        data-composer-context-control
+        disabled={containerPending}
+        onMouseDownCapture={stopContextMenuMouseDown}
       >
-        <SelectGroup>
-          <SelectGroupLabel>Workspace</SelectGroupLabel>
-          <SelectItem value="local">
-            <span className="inline-flex items-center gap-1.5">
-              {activeWorktreePath ? (
-                <FolderGitIcon className="size-3" />
-              ) : (
-                <FolderIcon className="size-3" />
-              )}
-              {resolveCurrentWorkspaceLabel(activeWorktreePath)}
-            </span>
-          </SelectItem>
-          <SelectItem value="worktree">
-            <span className="inline-flex items-center gap-1.5">
-              <FolderGit2Icon className="size-3" />
-              {resolveEnvModeLabel("worktree")}
-            </span>
-          </SelectItem>
-          {showPreviousWorktree && previousWorktreeLabel ? (
-            <SelectItem value={PREVIOUS_WORKTREE_SELECT_VALUE}>
-              <PreviousWorktreeItemContent branch={previousWorktreeBranch} />
-            </SelectItem>
-          ) : null}
-        </SelectGroup>
-      </SelectPopup>
-    </Select>
+        <Tooltip>
+          <TooltipTrigger render={<span className="inline-flex shrink-0" />}>
+            {workspaceIcon}
+          </TooltipTrigger>
+          <TooltipPopup>
+            {workspaceLabel}
+            {shortcutLabel ? ` · ${shortcutLabel}` : null}
+          </TooltipPopup>
+        </Tooltip>
+        <ComposerContextLabel>{workspaceLabel}</ComposerContextLabel>
+      </MenuTrigger>
+      <MenuPopup
+        align="start"
+        side="top"
+        sideOffset={4}
+        width="content"
+        {...composerFloatingLayerProps}
+      >
+        <MenuGroup>
+          <MenuGroupLabel>Workspace</MenuGroupLabel>
+          <MenuRadioGroup
+            value={containerValue ?? effectiveEnvMode}
+            onValueChange={(value) => {
+              if (value.startsWith("container:")) {
+                onContainerSelect?.(value);
+                return;
+              }
+              if (value === PREVIOUS_WORKTREE_SELECT_VALUE) {
+                onUsePreviousWorktree?.();
+                return;
+              }
+              onEnvModeChange(value as EnvMode);
+            }}
+          >
+            <MenuRadioItem value="local" closeOnClick>
+              <span className="inline-flex min-w-0 items-center gap-1.5">
+                {activeWorktreePath ? (
+                  <FolderGitIcon className="size-3" />
+                ) : (
+                  <FolderIcon className="size-3" />
+                )}
+                <span className="min-w-0 truncate">
+                  {resolveCurrentWorkspaceLabel(activeWorktreePath)}
+                </span>
+              </span>
+            </MenuRadioItem>
+            <MenuRadioItem value="worktree" closeOnClick>
+              <span className="inline-flex min-w-0 items-center gap-1.5">
+                <FolderGit2Icon className="size-3" />
+                <span className="min-w-0 truncate">{resolveEnvModeLabel("worktree")}</span>
+              </span>
+            </MenuRadioItem>
+            {showPreviousWorktree && previousWorktreeLabel ? (
+              <MenuRadioItem value={PREVIOUS_WORKTREE_SELECT_VALUE} closeOnClick>
+                <PreviousWorktreeItemContent branch={previousWorktreeBranch} />
+              </MenuRadioItem>
+            ) : null}
+            {containerFreshItem}
+          </MenuRadioGroup>
+          {containerExistingItem}
+        </MenuGroup>
+      </MenuPopup>
+    </Menu>
   );
 });

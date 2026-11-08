@@ -26,6 +26,9 @@ import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import { request } from "../rpc/client.ts";
 import type { ProjectFaviconCache, ProjectFaviconTarget } from "../projectFaviconCache.ts";
 import { createEnvironmentQueryAtomFamily } from "./runtime.ts";
+import { containerResourceUrl } from "../containers/endpoint.ts";
+import { withContainerAssetRefresh } from "../containers/assets.ts";
+import { authorizeContainerResource } from "../containers/media.ts";
 
 const ASSET_URL_REFRESH_INTERVAL_MS = 30 * 60_000;
 const ASSET_URL_STALE_TIME_MS = 5 * 60_000;
@@ -60,7 +63,7 @@ function parseAssetCollectionKey(
 
 export function resolveAssetUrl(httpBaseUrl: string, relativeUrl: string): string | null {
   try {
-    return new URL(relativeUrl, httpBaseUrl).toString();
+    return containerResourceUrl(httpBaseUrl, relativeUrl);
   } catch {
     return null;
   }
@@ -260,8 +263,16 @@ export function createAssetEnvironmentAtoms<R, E>(
   const execute = Effect.fn("assets.createUrl")(function* (input: AssetCreateUrlInput) {
     const supervisor = yield* EnvironmentSupervisor.EnvironmentSupervisor;
     const result = yield* mint(supervisor.target.environmentId, input).pipe(Effect.result);
-    if (Result.isSuccess(result)) return result.success;
+    if (Result.isSuccess(result)) {
+      const authorized = yield* authorizeContainerResource(result.success.relativeUrl);
+      return {
+        ...result.success,
+        relativeUrl: authorized.relativeUrl,
+        expiresAt: Math.min(result.success.expiresAt, authorized.expiresAt),
+      };
+    }
     const error = result.failure;
+    if (supervisor.target._tag === "ContainerConnectionTarget") return yield* error;
     const resource = input.resource;
     const local = localMediaEnvironment
       ? (yield* AtomRegistry.AtomRegistry).get(localMediaEnvironment)
@@ -286,7 +297,7 @@ export function createAssetEnvironmentAtoms<R, E>(
       .pipe(Effect.catchCause((cause) => Effect.failCause(Cause.map(cause, () => error))));
     return { ...asset, relativeUrl: new URL(asset.relativeUrl, local.httpBaseUrl).href };
   });
-  const createUrl = createEnvironmentQueryAtomFamily(runtime, {
+  const createBaseUrl = createEnvironmentQueryAtomFamily(runtime, {
     label: "environment-data:assets:create-url",
     execute,
     staleTimeMs: ASSET_URL_STALE_TIME_MS,
@@ -295,6 +306,11 @@ export function createAssetEnvironmentAtoms<R, E>(
     refreshTrigger: ({ input }) =>
       input.resource._tag === "media-file" ? localMediaEnvironment : undefined,
   });
+  const refreshed = Atom.family((atom: ReturnType<typeof createBaseUrl>) =>
+    withContainerAssetRefresh(atom),
+  );
+  const createUrl = (target: Parameters<typeof createBaseUrl>[0]) =>
+    refreshed(createBaseUrl(target));
   const createUrlsFamily = Atom.family((key: string) => {
     const [environmentId, resources] = parseAssetCollectionKey(key);
     return Atom.make((get) =>

@@ -31,6 +31,7 @@ export type SettingsPath =
   | "/settings/scheduled-tasks"
   | "/settings/source-control"
   | "/settings/worktrees"
+  | "/settings/containers"
   | "/settings/connections"
   | "/settings/access"
   | "/settings/secrets"
@@ -83,6 +84,7 @@ export interface SettingsSearchAvailability {
   readonly hasThreadAutoSettlement: boolean;
   readonly managedTunnelActive?: boolean;
   readonly hasPeerLinkHost?: boolean;
+  readonly containersEnabled?: boolean;
 }
 
 export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
@@ -101,6 +103,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/scheduled-tasks": "Scheduled tasks",
   "/settings/source-control": "Source control",
   "/settings/worktrees": "Worktrees",
+  "/settings/containers": "Containers",
   "/settings/connections": "Environments",
   "/settings/access": "Sharing & access",
   "/settings/secrets": "Secrets",
@@ -138,7 +141,12 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<{
   },
   {
     heading: "Code",
-    paths: ["/settings/projects", "/settings/source-control", "/settings/worktrees"],
+    paths: [
+      "/settings/projects",
+      "/settings/source-control",
+      "/settings/worktrees",
+      "/settings/containers",
+    ],
   },
   {
     heading: "Connections",
@@ -153,6 +161,14 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<{
     paths: ["/settings/maintenance", "/settings/labs", "/settings/about", "/settings/archived"],
   },
 ];
+
+export function settingsNavGroups(containersEnabled: boolean): typeof SETTINGS_NAV_GROUPS {
+  if (containersEnabled) return SETTINGS_NAV_GROUPS;
+  return SETTINGS_NAV_GROUPS.flatMap((group) => {
+    const paths = group.paths.filter((path) => path !== "/settings/containers");
+    return paths.length === 0 ? [] : [{ heading: group.heading, paths }];
+  });
+}
 
 export function keybindingSearchAnchorId<Command extends KeybindingCommand>(command: Command) {
   return `keybinding-${command}` as const;
@@ -216,6 +232,38 @@ const SOURCE_CONTROL_HOST_TERMS = sourceControlClients.definitions
   .join(" ");
 
 export const SETTINGS_SEARCH_ITEMS = [
+  {
+    id: "container-runtime-setting",
+    title: "Container runtime",
+    to: "/settings/containers",
+    targetId: "container-runtime",
+    scope: "project-defaults",
+    searchTerms: ["docker podman runtime engine provider default available"],
+  },
+  {
+    id: "container-setup",
+    title: "Container install, start, and environment",
+    to: "/settings/containers",
+    targetId: "container-setup",
+    scope: "project-defaults",
+    searchTerms: [
+      "docker ubuntu container workspace image install script start environment variables setup",
+    ],
+  },
+  {
+    id: "container-runtimes",
+    title: "Container cleanup and retained history",
+    to: "/settings/containers",
+    targetId: "container-setup",
+    scope: "project-defaults",
+    searchTerms: ["container docker stop restart remove retention idle cleanup history"],
+  },
+  {
+    id: "containers-feature",
+    title: "Containers",
+    to: "/settings/general",
+    searchTerms: ["containers docker feature toggle disable hide new container"],
+  },
   {
     id: "storage-worktree-keep-when",
     targetId: "storage-worktrees",
@@ -1192,6 +1240,7 @@ export type SettingsSearchItemId = (typeof SETTINGS_SEARCH_ITEMS)[number]["id"];
 const SEARCH_ITEMS_BY_ID = new Map(SETTINGS_SEARCH_ITEMS.map((item) => [item.id, item] as const));
 
 const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScope | null>> = {
+  "/settings/containers": "project-defaults",
   "/settings/diagnostics": "environment",
   "/settings/projects": "project",
   "/settings/general": null,
@@ -1338,7 +1387,8 @@ export function filterAvailableSettingsSearchItems(
       (!item.wslAvailableOnly || availability.isWslSettingsRowVisible) &&
       (!item.requiresThreadAutoSettlement || availability.hasThreadAutoSettlement) &&
       (!item.managedTunnelOnly || availability.managedTunnelActive === true) &&
-      (!item.peerLinksOnly || availability.hasPeerLinkHost === true),
+      (!item.peerLinksOnly || availability.hasPeerLinkHost === true) &&
+      (item.to !== "/settings/containers" || availability.containersEnabled !== false),
   );
 }
 
